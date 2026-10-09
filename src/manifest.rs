@@ -16,6 +16,7 @@ struct RawManifest {
     settings: Map<String, Value>,
     #[serde(default)]
     actions: Map<String, Value>,
+    release_tag_prefix: Option<String>,
     #[serde(default)]
     tags: BTreeMap<String, RawTag>,
     #[serde(default)]
@@ -33,6 +34,8 @@ struct RawTag {
     secrets: BTreeMap<String, String>,
     #[serde(default)]
     forbidden_secrets: Vec<String>,
+    #[serde(default)]
+    release_targets: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -41,6 +44,12 @@ struct RawRepo {
     #[serde(default)]
     tags: Vec<String>,
     rulesets: Option<Vec<String>>,
+    release_targets: Option<Vec<String>>,
+    release_tag_prefix: Option<String>,
+    /// `false` for repos whose GitHub releases aren't versions of the project,
+    /// like a Homebrew tap storing bottles.
+    #[serde(default = "yes")]
+    releases: bool,
     #[serde(default)]
     settings: Map<String, Value>,
     #[serde(default)]
@@ -66,6 +75,11 @@ pub struct Repo {
     pub secrets: BTreeMap<String, PathBuf>,
     /// Actions secrets that must not exist, from the repo's tags.
     pub forbidden_secrets: Vec<String>,
+    /// What the latest release's tag must start with, followed by the version.
+    pub release_tag_prefix: Option<String>,
+    /// Targets the latest release must have a binary archive for; `*` matches
+    /// anything.
+    pub release_targets: Vec<String>,
 }
 
 #[derive(Clone)]
@@ -124,10 +138,12 @@ impl Manifest {
             let mut variables = BTreeMap::new();
             let mut secrets = BTreeMap::new();
             let mut forbidden_secrets = Vec::new();
+            let mut release_targets = Vec::new();
             for tag in repo.tags.iter().filter_map(|t| raw.tags.get(t)) {
                 variables.extend(tag.variables.clone());
                 secrets.extend(tag.secrets.iter().map(|(k, v)| (k.clone(), expand_home(v))));
                 forbidden_secrets.extend(tag.forbidden_secrets.iter().cloned());
+                release_targets.extend(tag.release_targets.iter().cloned());
             }
 
             repos.push(Repo {
@@ -139,6 +155,17 @@ impl Manifest {
                 variables,
                 secrets,
                 forbidden_secrets,
+                release_tag_prefix: if repo.releases {
+                    repo.release_tag_prefix
+                        .or_else(|| raw.release_tag_prefix.clone())
+                } else {
+                    None
+                },
+                release_targets: if repo.releases {
+                    repo.release_targets.unwrap_or(release_targets)
+                } else {
+                    Vec::new()
+                },
             });
         }
 
@@ -154,4 +181,8 @@ fn expand_home(path: &str) -> PathBuf {
         (Some(rest), Some(home)) => Path::new(&home).join(rest),
         _ => PathBuf::from(path),
     }
+}
+
+const fn yes() -> bool {
+    true
 }

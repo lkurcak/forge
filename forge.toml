@@ -7,6 +7,11 @@
 
 owner = "lkurcak"
 
+# The latest GitHub release of every repo must be tagged vX.Y.Z. Repos without
+# releases are left alone; older bare X.Y.Z tags only matter while they're the
+# latest release.
+release_tag_prefix = "v"
+
 # Rulesets are opt-in per repo: `rulesets = [...]` names files in rulesets/,
 # without the .json extension.
 #   protect-default-branch  no deleting or force-pushing the default branch
@@ -42,6 +47,17 @@ variables = { TAP_APP_ID = "5098195" }
 secrets = { TAP_APP_PRIVATE_KEY = "~/.config/forge/tap-app.pem" }
 forbidden_secrets = ["HOMEBREW_TAP_TOKEN", "TAP_GITHUB_TOKEN"]
 
+# The latest release must include a binary archive per target, named
+# {repo}-vX.Y.Z-{target}.tar.gz (.zip on Windows); `*` matches anything.
+# A repo can replace the list with its own `release_targets`.
+[tags.binaries]
+release_targets = [
+  "aarch64-apple-darwin",
+  "aarch64-unknown-linux-gnu",
+  "x86_64-unknown-linux-gnu",
+  "x86_64-pc-windows-*",
+]
+
 # Published
 
 [repos.gud]
@@ -49,14 +65,16 @@ tags = ["rust", "crates-io", "homebrew"]
 rulesets = ["protect-default-branch"]
 
 [repos.tend]
-tags = ["rust", "crates-io", "homebrew"]
+tags = ["rust", "crates-io", "homebrew", "binaries"]
 rulesets = ["require-pr"]
 
+# Not `binaries`: its source repo is private, so the archives are published on
+# homebrew-tap's typr-dist-vX.Y.Z releases instead.
 [repos.typr]
 tags = ["rust", "homebrew"]
 
 [repos.ocalc]
-tags = ["ocaml", "homebrew"]
+tags = ["ocaml", "homebrew", "binaries"]
 
 [repos.folktime]
 tags = ["rust", "crates-io"]
@@ -78,7 +96,9 @@ tags = ["rust", "ghcr"]
 
 # Infrastructure
 
+# Its releases hold bottles and binaries for other repos.
 [repos.homebrew-tap]
+releases = false
 
 [repos.forge]
 tags = ["rust"]

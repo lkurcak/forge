@@ -2,6 +2,7 @@ mod diff;
 mod gh;
 mod manifest;
 mod reconcile;
+mod release;
 
 use std::path::PathBuf;
 use std::process::ExitCode;

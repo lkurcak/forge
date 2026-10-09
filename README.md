@@ -19,6 +19,10 @@ forge apply [REPO…]   # fix drift
 - `[tags.<name>]` adds Actions variables and secrets to every repo with that tag.
   Secret values come from local files (e.g. `~/.config/forge/tap-app.pem`) and are
   only set when the secret is missing, since GitHub never reveals them.
+- The latest GitHub release is checked too: its tag must look like
+  `release_tag_prefix` + `X.Y.Z`, and repos with `release_targets` (e.g. via the
+  `binaries` tag) must ship `{repo}-vX.Y.Z-{target}.tar.gz` (`.zip` on Windows)
+  for each target. These are only reported; the fix is the next release.
 
 Only keys present in the manifest are checked, so the live state can carry
 anything else without counting as drift.

@@ -87,6 +87,13 @@ pub fn reconcile(gh: &Gh, owner: &str, repo: &Repo, mode: Mode) -> Outcome {
         outcome.record(result);
     }
 
+    if repo.release_tag_prefix.is_some() || !repo.release_targets.is_empty() {
+        match crate::release::check(gh, &base, repo) {
+            Ok(problems) => outcome.manual.extend(problems),
+            Err(err) => outcome.errors.push(format!("{err:#}")),
+        }
+    }
+
     outcome
 }
 
