@@ -1,0 +1,105 @@
+# Repositories forge manages, and what they should look like.
+#
+# Top-level `settings`, `actions` and `rulesets` apply to every repo; a repo's
+# own table overrides them (`settings`/`actions` key by key, `rulesets` wholesale).
+# A repo's `tags` add the requirements listed under `[tags.<name>]`; tags
+# without a table are just labels.
+
+owner = "lkurcak"
+
+# Rulesets are opt-in per repo: `rulesets = [...]` names files in rulesets/,
+# without the .json extension.
+#   protect-default-branch  no deleting or force-pushing the default branch
+#   require-pr              changes to the default branch must go through a PR
+# Private repos are skipped: rulesets there need GitHub Pro.
+
+# PATCH /repos/{owner}/{repo}
+# Disabling merge commits and rebase merging is what makes PRs squash-only.
+[settings]
+allow_squash_merge = true
+allow_merge_commit = false
+allow_rebase_merge = false
+squash_merge_commit_title = "PR_TITLE"
+squash_merge_commit_message = "PR_BODY"
+delete_branch_on_merge = true
+allow_update_branch = true
+# Nothing has required checks for auto-merge to wait on.
+allow_auto_merge = false
+
+# PUT /repos/{owner}/{repo}/actions/permissions/workflow
+[actions]
+default_workflow_permissions = "read"
+# Nothing needs workflows to open PRs yet (release-plz would).
+can_approve_pull_request_reviews = false
+
+# Formula bumps go through the tap GitHub App, never personal access tokens.
+# The App only needs to be installed on homebrew-tap.
+# `secrets` maps each secret to the local file `forge apply` reads its value
+# from when the secret is missing. Values are never compared: GitHub doesn't
+# reveal them.
+[tags.homebrew]
+variables = { TAP_APP_ID = "5098195" }
+secrets = { TAP_APP_PRIVATE_KEY = "~/.config/forge/tap-app.pem" }
+forbidden_secrets = ["HOMEBREW_TAP_TOKEN", "TAP_GITHUB_TOKEN"]
+
+# Published
+
+[repos.gud]
+tags = ["rust", "crates-io", "homebrew"]
+rulesets = ["protect-default-branch"]
+
+[repos.tend]
+tags = ["rust", "crates-io", "homebrew"]
+rulesets = ["require-pr"]
+
+[repos.typr]
+tags = ["rust", "homebrew"]
+
+[repos.ocalc]
+tags = ["ocaml", "homebrew"]
+
+[repos.folktime]
+tags = ["rust", "crates-io"]
+
+[repos.split-paragraphs]
+tags = ["rust", "crates-io"]
+
+[repos.auburn]
+tags = ["rust", "crates-io"]
+
+[repos.math]
+tags = ["rust"]
+
+[repos.acct]
+tags = ["rust", "ghcr"]
+
+[repos.finwatch]
+tags = ["rust", "ghcr"]
+
+# Infrastructure
+
+[repos.homebrew-tap]
+
+[repos.forge]
+tags = ["rust"]
+
+# Active
+
+[repos.entropy-lab]
+tags = ["rust"]
+
+[repos.home-server]
+tags = ["rust"]
+
+[repos.sound]
+tags = ["rust"]
+
+[repos.magicube-solver]
+tags = ["rust"]
+
+[repos.arena-game]
+tags = ["rust"]
+
+[repos.nvim]
+
+[repos.cfg]
