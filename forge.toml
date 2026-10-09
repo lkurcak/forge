@@ -47,6 +47,13 @@ variables = { TAP_APP_ID = "5098195" }
 secrets = { TAP_APP_PRIVATE_KEY = "~/.config/forge/tap-app.pem" }
 forbidden_secrets = ["HOMEBREW_TAP_TOKEN", "TAP_GITHUB_TOKEN"]
 
+# winget submissions are PRs to microsoft/winget-pkgs from a fork, which a
+# GitHub App can't open, so this is a classic personal access token with
+# `public_repo` and `workflow` scopes. When it expires, renew it, save it to
+# the file and run `forge apply --update-secrets`.
+[tags.winget]
+secrets = { WINGET_PAT = "~/.config/forge/winget-pat" }
+
 # The latest release must include a binary archive per target, named
 # {repo}-vX.Y.Z-{target}.tar.gz (.zip on Windows); `*` matches anything.
 # A repo can replace the list with its own `release_targets`.
@@ -65,7 +72,7 @@ tags = ["rust", "crates-io", "homebrew"]
 rulesets = ["protect-default-branch"]
 
 [repos.tend]
-tags = ["rust", "crates-io", "homebrew", "binaries"]
+tags = ["rust", "crates-io", "homebrew", "binaries", "winget"]
 rulesets = ["require-pr"]
 
 # Not `binaries`: its source repo is private, so the archives are published on

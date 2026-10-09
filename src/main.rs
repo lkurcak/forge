@@ -39,6 +39,10 @@ enum Command {
     Apply {
         /// Repositories to update (default: all managed).
         repos: Vec<String>,
+        /// Also overwrite secrets that already exist, from their local files
+        /// (after renewing a token, say). Normally only missing ones are set.
+        #[arg(long)]
+        update_secrets: bool,
     },
     /// List managed repositories, and owned ones the manifest doesn't cover.
     List,
@@ -61,7 +65,10 @@ fn run() -> Result<ExitCode> {
 
     match cli.command {
         Command::Check { repos } => sync(&gh, &manifest, &repos, Mode::Check),
-        Command::Apply { repos } => sync(&gh, &manifest, &repos, Mode::Apply),
+        Command::Apply {
+            repos,
+            update_secrets,
+        } => sync(&gh, &manifest, &repos, Mode::Apply { update_secrets }),
         Command::List => list(&gh, &manifest),
     }
 }

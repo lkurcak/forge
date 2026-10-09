@@ -10,7 +10,16 @@ use crate::manifest::{Repo, Ruleset};
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
     Check,
-    Apply,
+    Apply {
+        /// Also overwrite secrets that already exist, e.g. after renewing a token.
+        update_secrets: bool,
+    },
+}
+
+impl Mode {
+    const fn applies(self) -> bool {
+        matches!(self, Self::Apply { .. })
+    }
 }
 
 /// What reconciling one repository found.
@@ -120,7 +129,7 @@ fn object_drift(
         .iter()
         .map(ToString::to_string)
         .collect();
-    if mode == Mode::Apply && !drift.is_empty() {
+    if mode.applies() && !drift.is_empty() {
         gh.api(method, path, Some(&expected))?;
     }
     Ok(drift)
@@ -142,7 +151,7 @@ fn ruleset_drift(
         .and_then(|r| r["id"].as_u64());
 
     let Some(id) = id else {
-        if mode == Mode::Apply {
+        if mode.applies() {
             gh.api("POST", &format!("{base}/rulesets"), Some(&ruleset.body))?;
         }
         return Ok(vec![format!("{label}: missing")]);
@@ -154,7 +163,7 @@ fn ruleset_drift(
         .iter()
         .map(ToString::to_string)
         .collect();
-    if mode == Mode::Apply && !drift.is_empty() {
+    if mode.applies() && !drift.is_empty() {
         gh.api("PUT", &path, Some(&ruleset.body))?;
     }
     Ok(drift)
@@ -172,7 +181,7 @@ fn variables_drift(gh: &Gh, mode: Mode, base: &str, repo: &Repo) -> Result<Vec<S
         match actual.iter().find(|v| v["name"] == name.as_str()) {
             None => {
                 drift.push(format!("variable {name}: missing"));
-                if mode == Mode::Apply {
+                if mode.applies() {
                     gh.api("POST", &format!("{base}/actions/variables"), Some(&body))?;
                 }
             }
@@ -181,7 +190,7 @@ fn variables_drift(gh: &Gh, mode: Mode, base: &str, repo: &Repo) -> Result<Vec<S
                     "variable {name}: expected {value:?}, found {}",
                     v["value"]
                 ));
-                if mode == Mode::Apply {
+                if mode.applies() {
                     gh.api(
                         "PATCH",
                         &format!("{base}/actions/variables/{name}"),
@@ -215,22 +224,35 @@ fn secrets_drift(
         .collect();
     let mut drift = Vec::new();
 
+    let update_existing = matches!(
+        mode,
+        Mode::Apply {
+            update_secrets: true
+        }
+    );
     for (name, file) in &repo.secrets {
-        if names.contains(&name.as_str()) {
+        let exists = names.contains(&name.as_str());
+        if exists && !update_existing {
             continue;
         }
         if !file.exists() {
             manual.push(format!(
-                "secret {name}: missing, and there's no value at {} to set it from",
+                "secret {name}: {}, and there's no value at {} to set it from",
+                if exists { "can't update" } else { "missing" },
                 file.display()
             ));
             continue;
         }
-        drift.push(format!("secret {name}: missing"));
-        if mode == Mode::Apply {
+        drift.push(format!(
+            "secret {name}: {}",
+            if exists { "updated" } else { "missing" }
+        ));
+        if mode.applies() {
             let value = fs::read(file)
                 .with_context(|| format!("reading secret {name} from {}", file.display()))?;
-            gh.set_secret(&format!("{owner}/{}", repo.name), name, &value)?;
+            // Files usually end in a newline, which would break a token.
+            let value = value.trim_ascii_end();
+            gh.set_secret(&format!("{owner}/{}", repo.name), name, value)?;
         }
     }
 
