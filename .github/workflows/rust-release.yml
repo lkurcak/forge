@@ -1,0 +1,246 @@
+name: Rust release
+
+# The release pipeline shared by every Rust repo forge manages. Each repo's
+# release.yml calls it on a vX.Y.Z tag push:
+#
+#   on:
+#     push:
+#       tags: ["v[0-9]+.[0-9]+.[0-9]+"]
+#   jobs:
+#     release:
+#       uses: lkurcak/forge/.github/workflows/rust-release.yml@v1
+#       permissions:
+#         contents: write
+#         id-token: write
+#       secrets: inherit
+#       with:
+#         crates-io: true
+#
+# The inputs follow the repo's tags in forge.toml. Binaries are built and
+# tested before anything is published, so a broken target stops the release
+# before crates.io has it. The GitHub release is created last with every
+# archive attached, so a release that exists is complete.
+#
+# crates.io trusted publishing matches the caller's workflow file, so it stays
+# configured as release.yml with the `release` environment.
+
+on:
+  workflow_call:
+    inputs:
+      crates-io:
+        description: Publish to crates.io through trusted publishing.
+        type: boolean
+        default: false
+      targets:
+        description: >-
+          Space-separated targets to build {repo}-vX.Y.Z-{target} archives for
+          (.tar.gz, or .zip on Windows). Empty builds none.
+        type: string
+        default: ""
+      homebrew:
+        description: Open a PR bumping Formula/{repo}.rb in lkurcak/homebrew-tap.
+        type: boolean
+        default: false
+      winget:
+        description: >-
+          Submit lkurcak.{repo} to winget-pkgs from the windows-msvc zips. The
+          first version has to be submitted by hand (komac new), since the
+          action only updates existing packages.
+        type: boolean
+        default: false
+
+env:
+  CARGO_TERM_COLOR: always
+  REPO: ${{ github.event.repository.name }}
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Check tag matches Cargo.toml version
+        id: version
+        run: |
+          version=$(cargo metadata --no-deps --format-version 1 \
+            | jq -r --arg name "$REPO" '[.packages[] | select(.name == $name)][0] // .packages[0] | .version')
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match Cargo.toml version v$version"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - name: Pick a runner per target
+        id: matrix
+        env:
+          TARGETS: ${{ inputs.targets }}
+        run: |
+          include='[]'
+          for target in $TARGETS; do
+            case "$target" in
+              *-apple-darwin)              os=macos-latest ;;
+              aarch64-unknown-linux-*)     os=ubuntu-24.04-arm ;;
+              x86_64-unknown-linux-*)      os=ubuntu-latest ;;
+              aarch64-pc-windows-msvc)     os=windows-11-arm ;;
+              x86_64-pc-windows-msvc)      os=windows-latest ;;
+              *) echo "::error::No runner known for target $target"; exit 1 ;;
+            esac
+            include=$(jq -c --arg t "$target" --arg os "$os" '. + [{target: $t, os: $os}]' <<<"$include")
+          done
+          echo "matrix=$(jq -c '{include: .}' <<<"$include")" >> "$GITHUB_OUTPUT"
+      - if: inputs.crates-io
+        run: cargo publish --dry-run --locked
+
+  build:
+    needs: verify
+    if: inputs.targets != ''
+    strategy:
+      fail-fast: true
+      matrix: ${{ fromJSON(needs.verify.outputs.matrix) }}
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    env:
+      TARGET: ${{ matrix.target }}
+      ARCHIVE: ${{ github.event.repository.name }}-v${{ needs.verify.outputs.version }}-${{ matrix.target }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - if: contains(matrix.target, '-musl')
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - name: Build
+        shell: bash
+        env:
+          # No VC++ runtime dependency on Windows.
+          RUSTFLAGS: ${{ contains(matrix.target, 'windows-msvc') && '-C target-feature=+crt-static' || '' }}
+        run: cargo build --release --locked --target "$TARGET"
+      - name: Archive
+        shell: bash
+        run: |
+          case "$TARGET" in *windows*) exe=.exe ;; *) exe= ;; esac
+          mkdir "$ARCHIVE"
+          cp "target/$TARGET/release/$REPO$exe" "$ARCHIVE/"
+          cp README* LICENSE* UNLICENSE* "$ARCHIVE/" 2>/dev/null || true
+          if [ -n "$exe" ]; then
+            7z a "$ARCHIVE.zip" "./$ARCHIVE/*"
+          else
+            tar czf "$ARCHIVE.tar.gz" "$ARCHIVE"
+          fi
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ env.ARCHIVE }}
+          path: ${{ env.ARCHIVE }}.*
+          if-no-files-found: error
+
+  crates-io:
+    needs: [verify, build]
+    if: ${{ inputs.crates-io && !failure() && !cancelled() }}
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: rust-lang/crates-io-auth-action@v1
+        id: auth
+      - run: cargo publish --locked
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+
+  github-release:
+    needs: [verify, build, crates-io]
+    if: ${{ !failure() && !cancelled() }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - if: inputs.targets != ''
+        uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          shopt -s nullglob
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "$GITHUB_REF_NAME" \
+            --generate-notes \
+            --verify-tag
+
+  homebrew:
+    needs: [verify, github-release]
+    if: ${{ inputs.homebrew && !failure() && !cancelled() }}
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/create-github-app-token@v3
+        id: app-token
+        with:
+          app-id: ${{ vars.TAP_APP_ID }}
+          private-key: ${{ secrets.TAP_APP_PRIVATE_KEY }}
+          repositories: homebrew-tap
+      - uses: actions/checkout@v7
+        with:
+          repository: lkurcak/homebrew-tap
+          token: ${{ steps.app-token.outputs.token }}
+      - name: Open formula bump PR
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
+          VERSION: ${{ needs.verify.outputs.version }}
+        run: |
+          url="https://github.com/${GITHUB_REPOSITORY}/archive/refs/tags/${GITHUB_REF_NAME}.tar.gz"
+          sha256=$(curl -fsSL "$url" | sha256sum | cut -d' ' -f1)
+          formula="Formula/${REPO}.rb"
+
+          sed -i -E \
+            -e "s|^  url \".*\"$|  url \"${url}\"|" \
+            -e "s|^  sha256 \"[0-9a-f]+\"$|  sha256 \"${sha256}\"|" \
+            "$formula"
+          git diff --exit-code --quiet "$formula" && { echo "::error::$formula unchanged"; exit 1; }
+
+          branch="bump-${REPO}-${VERSION}"
+          git config user.name "${APP_SLUG}[bot]"
+          git config user.email "$(gh api "/users/${APP_SLUG}%5Bbot%5D" --jq .id)+${APP_SLUG}[bot]@users.noreply.github.com"
+          git switch -c "$branch"
+          git commit -am "${REPO} ${VERSION}"
+          git push -u origin "$branch"
+          gh pr create --title "${REPO} ${VERSION}" --body "Automated bump from ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/tag/${GITHUB_REF_NAME}"
+
+  winget:
+    needs: [verify, github-release]
+    if: ${{ inputs.winget && !failure() && !cancelled() }}
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Check the package exists in winget-pkgs
+        id: exists
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh api "repos/microsoft/winget-pkgs/contents/manifests/l/lkurcak/${REPO}" --silent; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::lkurcak.${REPO} isn't in winget-pkgs yet; submit the first version with komac new"
+          fi
+      - if: steps.exists.outputs.exists == 'true'
+        uses: vedantmgoyal9/winget-releaser@v2
+        with:
+          identifier: lkurcak.${{ github.event.repository.name }}
+          version: ${{ needs.verify.outputs.version }}
+          installers-regex: -pc-windows-msvc\.zip$
+          release-tag: ${{ github.ref_name }}
+          token: ${{ secrets.WINGET_PAT }}

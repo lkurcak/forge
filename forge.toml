@@ -62,13 +62,13 @@ release_targets = [
   "aarch64-apple-darwin",
   "aarch64-unknown-linux-gnu",
   "x86_64-unknown-linux-gnu",
-  "x86_64-pc-windows-*",
+  "x86_64-pc-windows-msvc",
 ]
 
 # Published
 
 [repos.gud]
-tags = ["rust", "crates-io", "homebrew"]
+tags = ["rust", "crates-io", "homebrew", "binaries", "winget"]
 rulesets = ["protect-default-branch"]
 
 [repos.tend]
@@ -82,6 +82,13 @@ tags = ["rust", "homebrew"]
 
 [repos.ocalc]
 tags = ["ocaml", "homebrew", "binaries"]
+# OCaml builds Windows binaries with MinGW.
+release_targets = [
+  "aarch64-apple-darwin",
+  "aarch64-unknown-linux-gnu",
+  "x86_64-unknown-linux-gnu",
+  "x86_64-pc-windows-gnu",
+]
 
 [repos.folktime]
 tags = ["rust", "crates-io"]
