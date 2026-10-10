@@ -1,3 +1,4 @@
+use std::fmt::Write as _;
 use std::io::Write;
 use std::process::{Command, Stdio};
 
@@ -63,6 +64,28 @@ impl Gh {
         }
         serde_json::from_slice(&out.stdout)
             .with_context(|| format!("{method} {path}: unexpected response"))
+    }
+
+    /// A file's contents at `git_ref` (the default branch if `None`), or
+    /// `None` if it doesn't exist there.
+    pub fn file(&self, repo: &str, path: &str, git_ref: Option<&str>) -> Result<Option<String>> {
+        let mut endpoint = format!("repos/{repo}/contents/{path}");
+        if let Some(git_ref) = git_ref {
+            write!(endpoint, "?ref={git_ref}")?;
+        }
+        let out = Command::new("gh")
+            .args(["api", "-H", "Accept: application/vnd.github.raw", &endpoint])
+            .env("GH_TOKEN", &self.token)
+            .output()
+            .context("running gh")?;
+        if !out.status.success() {
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            if stderr.contains("(HTTP 404)") {
+                return Ok(None);
+            }
+            bail!("GET {endpoint}: {}", stderr.trim());
+        }
+        Ok(Some(String::from_utf8(out.stdout)?))
     }
 
     /// Sets an Actions secret; gh takes care of encrypting it for the repo.

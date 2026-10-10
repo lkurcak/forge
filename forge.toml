@@ -37,6 +37,18 @@ default_workflow_permissions = "read"
 # Nothing needs workflows to open PRs yet (release-plz would).
 can_approve_pull_request_reviews = false
 
+# Repos with this tag release through forge's shared workflow
+# (.github/workflows/rust-release.yml): their own .github/workflows/release.yml
+# only calls it, and forge renders that file from the repo's tags. A tag's
+# `release_inputs` become workflow inputs; `release_targets` become `targets`.
+# `@v1` moves along with compatible changes to the shared workflow.
+[tags.rust-release]
+release_workflow = "lkurcak/forge/.github/workflows/rust-release.yml@v1"
+
+# Also checked: crates.io's newest version is the latest release.
+[tags.crates-io]
+release_inputs = { crates-io = true }
+
 # Formula bumps go through the tap GitHub App, never personal access tokens.
 # The App only needs to be installed on homebrew-tap.
 # `secrets` maps each secret to the local file `forge apply` reads its value
@@ -46,6 +58,8 @@ can_approve_pull_request_reviews = false
 variables = { TAP_APP_ID = "5098195" }
 secrets = { TAP_APP_PRIVATE_KEY = "~/.config/forge/tap-app.pem" }
 forbidden_secrets = ["HOMEBREW_TAP_TOKEN", "TAP_GITHUB_TOKEN"]
+# Also checked: Formula/{repo}.rb points at the latest release, or a PR bumps it.
+release_inputs = { homebrew = true }
 
 # winget submissions are PRs to microsoft/winget-pkgs from a fork, which a
 # GitHub App can't open, so this is a classic personal access token with
@@ -56,6 +70,10 @@ secrets = { WINGET_PAT = "~/.config/forge/winget-pat" }
 # The winget package installs from these zips, one per architecture. They add
 # to the `binaries` targets.
 release_targets = ["x86_64-pc-windows-msvc", "aarch64-pc-windows-msvc"]
+# Also checked: winget-pkgs has the latest release as {owner}.{repo}, or a PR
+# adds it. The first version has to be submitted with komac; see the
+# publish-winget skill.
+release_inputs = { winget = true }
 
 # The latest release must include a binary archive per target, named
 # {repo}-vX.Y.Z-{target}.tar.gz (.zip on Windows); `*` matches anything.
@@ -71,7 +89,7 @@ release_targets = [
 # Published
 
 [repos.gud]
-tags = ["rust", "crates-io", "homebrew", "binaries", "winget"]
+tags = ["rust", "rust-release", "crates-io", "homebrew", "binaries", "winget"]
 rulesets = ["protect-default-branch"]
 
 [repos.tend]

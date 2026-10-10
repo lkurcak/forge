@@ -3,6 +3,7 @@ mod gh;
 mod manifest;
 mod reconcile;
 mod release;
+mod workflow;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -99,6 +100,9 @@ fn sync(gh: &Gh, manifest: &Manifest, names: &[String], mode: Mode) -> Result<Ex
         }
         for line in &outcome.manual {
             println!("    {line} (fix by hand)");
+        }
+        for line in &outcome.pending {
+            println!("    pending: {line}");
         }
         for line in &outcome.skipped {
             println!("    skipped {line}");

@@ -36,6 +36,12 @@ struct RawTag {
     forbidden_secrets: Vec<String>,
     #[serde(default)]
     release_targets: Vec<String>,
+    /// The reusable workflow repos with this tag release through, as a
+    /// `uses:` reference.
+    release_workflow: Option<String>,
+    /// Inputs this tag passes to the release workflow.
+    #[serde(default)]
+    release_inputs: BTreeMap<String, Value>,
 }
 
 #[derive(Deserialize)]
@@ -80,6 +86,11 @@ pub struct Repo {
     /// Targets the latest release must have a binary archive for; `*` matches
     /// anything.
     pub release_targets: Vec<String>,
+    /// The reusable workflow `.github/workflows/release.yml` must call, from
+    /// the repo's tags.
+    pub release_workflow: Option<String>,
+    /// Inputs `release.yml` passes to it, from the repo's tags.
+    pub release_inputs: BTreeMap<String, Value>,
 }
 
 #[derive(Clone)]
@@ -139,6 +150,8 @@ impl Manifest {
             let mut secrets = BTreeMap::new();
             let mut forbidden_secrets = Vec::new();
             let mut release_targets = Vec::new();
+            let mut release_workflow = None;
+            let mut release_inputs = BTreeMap::new();
             for tag in repo.tags.iter().filter_map(|t| raw.tags.get(t)) {
                 variables.extend(tag.variables.clone());
                 secrets.extend(tag.secrets.iter().map(|(k, v)| (k.clone(), expand_home(v))));
@@ -148,6 +161,8 @@ impl Manifest {
                         release_targets.push(target.clone());
                     }
                 }
+                release_workflow = release_workflow.or_else(|| tag.release_workflow.clone());
+                release_inputs.extend(tag.release_inputs.clone());
             }
 
             repos.push(Repo {
@@ -170,6 +185,8 @@ impl Manifest {
                 } else {
                     Vec::new()
                 },
+                release_workflow,
+                release_inputs,
             });
         }
 

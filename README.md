@@ -23,6 +23,13 @@ forge apply [REPO…]   # fix drift
   `release_tag_prefix` + `X.Y.Z`, and repos with `release_targets` (e.g. via the
   `binaries` tag) must ship `{repo}-vX.Y.Z-{target}.tar.gz` (`.zip` on Windows)
   for each target. These are only reported; the fix is the next release.
+- Repos tagged `rust-release` release through the shared
+  [`rust-release.yml`](.github/workflows/rust-release.yml): forge renders their
+  `.github/workflows/release.yml` from their tags (`crates-io`, `homebrew`,
+  `binaries`, `winget`), and `apply` opens a PR when it differs.
+- Tags naming a package manager also check it has the latest release: crates.io,
+  the `homebrew-tap` formula and winget-pkgs. An open PR delivering it shows as
+  `pending` and doesn't fail the check.
 
 Only keys present in the manifest are checked, so the live state can carry
 anything else without counting as drift.
@@ -31,4 +38,5 @@ anything else without counting as drift.
 
 forge calls the API through `gh`, using the token gh holds for the manifest's
 `owner` (`gh auth token --user <owner>`), so the active gh account doesn't
-matter. `GH_TOKEN` overrides this.
+matter. `GH_TOKEN` overrides this. Writing workflow files needs the `workflow`
+scope: `gh auth refresh -h github.com -s workflow`.

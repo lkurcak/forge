@@ -17,7 +17,7 @@ pub enum Mode {
 }
 
 impl Mode {
-    const fn applies(self) -> bool {
+    pub const fn applies(self) -> bool {
         matches!(self, Self::Apply { .. })
     }
 }
@@ -33,6 +33,8 @@ pub struct Outcome {
     pub skipped: Vec<String>,
     /// Differences forge can't fix itself, like secrets whose values it never sees.
     pub manual: Vec<String>,
+    /// Things on their way to being right, like a release waiting on review.
+    pub pending: Vec<String>,
 }
 
 /// Compares one repository against the manifest and, in apply mode, fixes it.
@@ -96,9 +98,17 @@ pub fn reconcile(gh: &Gh, owner: &str, repo: &Repo, mode: Mode) -> Outcome {
         outcome.record(result);
     }
 
+    if repo.release_workflow.is_some() {
+        let result = crate::workflow::drift(gh, mode, owner, repo);
+        outcome.record(result);
+    }
+
     if repo.release_tag_prefix.is_some() || !repo.release_targets.is_empty() {
-        match crate::release::check(gh, &base, repo) {
-            Ok(problems) => outcome.manual.extend(problems),
+        match crate::release::check(gh, owner, repo) {
+            Ok(findings) => {
+                outcome.manual.extend(findings.problems);
+                outcome.pending.extend(findings.pending);
+            }
             Err(err) => outcome.errors.push(format!("{err:#}")),
         }
     }
