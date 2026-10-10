@@ -115,10 +115,10 @@ release_targets = [
 ]
 
 [repos.folktime]
-tags = ["rust", "crates-io"]
+tags = ["rust", "rust-release", "crates-io"]
 
 [repos.split-paragraphs]
-tags = ["rust", "crates-io"]
+tags = ["rust", "rust-release", "crates-io"]
 
 [repos.auburn]
 tags = ["rust", "crates-io"]
