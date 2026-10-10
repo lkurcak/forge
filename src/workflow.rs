@@ -170,6 +170,7 @@ mod tests {
             variables: BTreeMap::new(),
             secrets: BTreeMap::new(),
             forbidden_secrets: Vec::new(),
+            environments: Vec::new(),
             release_tag_prefix: Some("v".into()),
             release_targets: targets.iter().map(|&t| t.into()).collect(),
             release_workflow: Some("lkurcak/forge/.github/workflows/rust-release.yml@v1".into()),

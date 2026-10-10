@@ -98,6 +98,11 @@ pub fn reconcile(gh: &Gh, owner: &str, repo: &Repo, mode: Mode) -> Outcome {
         outcome.record(result);
     }
 
+    if !repo.environments.is_empty() {
+        let result = environments_drift(gh, mode, &base, repo);
+        outcome.record(result);
+    }
+
     if repo.release_workflow.is_some() {
         let result = crate::workflow::drift(gh, mode, owner, repo);
         outcome.record(result);
@@ -212,6 +217,29 @@ fn variables_drift(gh: &Gh, mode: Mode, base: &str, repo: &Repo) -> Result<Vec<S
         }
     }
 
+    Ok(drift)
+}
+
+/// Missing environments are created bare: no protection rules or branch
+/// policy, so the jobs using them run without waiting.
+fn environments_drift(gh: &Gh, mode: Mode, base: &str, repo: &Repo) -> Result<Vec<String>> {
+    let actual = gh.get(&format!("{base}/environments?per_page=100"))?;
+    let names: Vec<&str> = actual["environments"]
+        .as_array()
+        .context("unexpected environments response")?
+        .iter()
+        .filter_map(|e| e["name"].as_str())
+        .collect();
+    let mut drift = Vec::new();
+    for name in &repo.environments {
+        if names.contains(&name.as_str()) {
+            continue;
+        }
+        drift.push(format!("environment {name}: missing"));
+        if mode.applies() {
+            gh.api("PUT", &format!("{base}/environments/{name}"), None)?;
+        }
+    }
     Ok(drift)
 }
 

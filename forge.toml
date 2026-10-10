@@ -44,6 +44,10 @@ can_approve_pull_request_reviews = false
 # `@v1` moves along with compatible changes to the shared workflow.
 [tags.rust-release]
 release_workflow = "lkurcak/forge/.github/workflows/rust-release.yml@v1"
+# Its crates.io and Homebrew jobs run in this environment, and crates.io's
+# trusted publisher is configured for it (workflow release.yml, environment
+# release). forge can't see the crates.io side; set it in the crate's settings.
+environments = ["release"]
 
 # Also checked: crates.io's newest version is the latest release.
 [tags.crates-io]

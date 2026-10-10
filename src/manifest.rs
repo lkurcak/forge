@@ -34,6 +34,9 @@ struct RawTag {
     secrets: BTreeMap<String, String>,
     #[serde(default)]
     forbidden_secrets: Vec<String>,
+    /// Deployment environments that must exist.
+    #[serde(default)]
+    environments: Vec<String>,
     #[serde(default)]
     release_targets: Vec<String>,
     /// The reusable workflow repos with this tag release through, as a
@@ -81,6 +84,8 @@ pub struct Repo {
     pub secrets: BTreeMap<String, PathBuf>,
     /// Actions secrets that must not exist, from the repo's tags.
     pub forbidden_secrets: Vec<String>,
+    /// Deployment environments that must exist, from the repo's tags.
+    pub environments: Vec<String>,
     /// What the latest release's tag must start with, followed by the version.
     pub release_tag_prefix: Option<String>,
     /// Targets the latest release must have a binary archive for; `*` matches
@@ -149,6 +154,7 @@ impl Manifest {
             let mut variables = BTreeMap::new();
             let mut secrets = BTreeMap::new();
             let mut forbidden_secrets = Vec::new();
+            let mut environments: Vec<String> = Vec::new();
             let mut release_targets = Vec::new();
             let mut release_workflow = None;
             let mut release_inputs = BTreeMap::new();
@@ -156,6 +162,11 @@ impl Manifest {
                 variables.extend(tag.variables.clone());
                 secrets.extend(tag.secrets.iter().map(|(k, v)| (k.clone(), expand_home(v))));
                 forbidden_secrets.extend(tag.forbidden_secrets.iter().cloned());
+                for env in &tag.environments {
+                    if !environments.contains(env) {
+                        environments.push(env.clone());
+                    }
+                }
                 for target in &tag.release_targets {
                     if !release_targets.contains(target) {
                         release_targets.push(target.clone());
@@ -174,6 +185,7 @@ impl Manifest {
                 variables,
                 secrets,
                 forbidden_secrets,
+                environments,
                 release_tag_prefix: if repo.releases {
                     repo.release_tag_prefix
                         .or_else(|| raw.release_tag_prefix.clone())

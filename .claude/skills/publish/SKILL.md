@@ -32,7 +32,8 @@ release (open PRs show as `pending`).
 3. **One-time prerequisites per channel**, if the repo is new to it:
    - `crates-io`: the crate needs a trusted publisher on crates.io (repo, workflow
      `release.yml`, environment `release`). Only the owner can set it up, in the crate's
-     settings; ask them. A crate that's never been published needs a first manual
+     settings, and forge can't check it; ask them. forge creates the `release`
+     environment itself. A crate that's never been published needs a first manual
      `cargo publish` by the owner.
    - `homebrew`: `Formula/{repo}.rb` must exist in homebrew-tap (copy `gud.rb`). The tap
      App needs no change.
