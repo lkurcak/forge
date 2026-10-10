@@ -92,7 +92,7 @@ tags = ["rust", "rust-release", "crates-io", "homebrew", "binaries", "winget"]
 rulesets = ["protect-default-branch"]
 
 [repos.tend]
-tags = ["rust", "crates-io", "homebrew", "binaries", "winget"]
+tags = ["rust", "rust-release", "crates-io", "homebrew", "binaries", "winget"]
 rulesets = ["require-pr"]
 
 # Not `binaries`: its source repo is private, so the archives are published on
