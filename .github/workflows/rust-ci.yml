@@ -28,12 +28,12 @@ name: Rust CI
 on:
   workflow_call:
     inputs:
-      check-targets:
+      no-std:
         description: >-
-          Space-separated extra targets to build for with
-          --no-default-features, like no_std or wasm ones.
-        type: string
-        default: ""
+          The crate works without std: build it with --no-default-features
+          for NO_STD_TARGET, which has no std at all, on stable and the MSRV.
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -44,6 +44,9 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
+  # Bare-metal ARM: anything reaching for std, in the crate or its
+  # dependencies, fails to build here.
+  NO_STD_TARGET: thumbv7em-none-eabi
 
 jobs:
   fmt:
@@ -120,24 +123,21 @@ jobs:
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ steps.msrv.outputs.version }}
+          targets: ${{ inputs.no-std && env.NO_STD_TARGET || '' }}
       - if: steps.msrv.outputs.version != ''
         uses: Swatinem/rust-cache@v2
       - if: steps.msrv.outputs.version != ''
         run: cargo test --workspace --all-features --locked
+      - if: steps.msrv.outputs.version != '' && inputs.no-std
+        run: cargo build --workspace --no-default-features --locked --target "$NO_STD_TARGET"
 
-  check-targets:
-    if: inputs.check-targets != ''
+  no-std:
+    if: inputs.no-std
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ env.NO_STD_TARGET }}
       - uses: Swatinem/rust-cache@v2
-      - name: Build
-        env:
-          TARGETS: ${{ inputs.check-targets }}
-        run: |
-          # shellcheck disable=SC2086 # one argument per target
-          rustup target add $TARGETS
-          for target in $TARGETS; do
-            cargo build --workspace --no-default-features --locked --target "$target"
-          done
+      - run: cargo build --workspace --no-default-features --locked --target "$NO_STD_TARGET"
