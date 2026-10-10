@@ -128,7 +128,8 @@ jobs:
           cp "target/$TARGET/release/$REPO$exe" "$ARCHIVE/"
           cp README* LICENSE* UNLICENSE* "$ARCHIVE/" 2>/dev/null || true
           if [ -n "$exe" ]; then
-            7z a "$ARCHIVE.zip" "./$ARCHIVE/*"
+            # PowerShell is on every Windows image, ARM included; 7-Zip may not be.
+            pwsh -NoProfile -Command "Compress-Archive -Path '$ARCHIVE/*' -DestinationPath '$ARCHIVE.zip'"
           else
             tar czf "$ARCHIVE.tar.gz" "$ARCHIVE"
           fi

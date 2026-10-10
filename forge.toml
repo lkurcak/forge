@@ -53,6 +53,9 @@ forbidden_secrets = ["HOMEBREW_TAP_TOKEN", "TAP_GITHUB_TOKEN"]
 # the file and run `forge apply --update-secrets`.
 [tags.winget]
 secrets = { WINGET_PAT = "~/.config/forge/winget-pat" }
+# The winget package installs from these zips, one per architecture. They add
+# to the `binaries` targets.
+release_targets = ["x86_64-pc-windows-msvc", "aarch64-pc-windows-msvc"]
 
 # The latest release must include a binary archive per target, named
 # {repo}-vX.Y.Z-{target}.tar.gz (.zip on Windows); `*` matches anything.

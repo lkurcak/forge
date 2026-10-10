@@ -143,7 +143,11 @@ impl Manifest {
                 variables.extend(tag.variables.clone());
                 secrets.extend(tag.secrets.iter().map(|(k, v)| (k.clone(), expand_home(v))));
                 forbidden_secrets.extend(tag.forbidden_secrets.iter().cloned());
-                release_targets.extend(tag.release_targets.iter().cloned());
+                for target in &tag.release_targets {
+                    if !release_targets.contains(target) {
+                        release_targets.push(target.clone());
+                    }
+                }
             }
 
             repos.push(Repo {
