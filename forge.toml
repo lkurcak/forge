@@ -71,8 +71,7 @@ secrets = { WINGET_PAT = "~/.config/forge/winget-pat" }
 # to the `binaries` targets.
 release_targets = ["x86_64-pc-windows-msvc", "aarch64-pc-windows-msvc"]
 # Also checked: winget-pkgs has the latest release as {owner}.{repo}, or a PR
-# adds it. The first version has to be submitted with komac; see the
-# publish-winget skill.
+# adds it. The first version has to be submitted with scripts/winget-new.sh.
 release_inputs = { winget = true }
 
 # The latest release must include a binary archive per target, named
