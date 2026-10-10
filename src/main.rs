@@ -79,7 +79,7 @@ const WORKERS: usize = 8;
 
 fn sync(gh: &Gh, manifest: &Manifest, names: &[String], mode: Mode) -> Result<ExitCode> {
     let repos = select(manifest, names)?;
-    let outcomes = in_parallel(&repos, |repo| reconcile(gh, &manifest.owner, repo, mode));
+    let outcomes = in_parallel(&repos, |repo| reconcile(gh, manifest, repo, mode));
     let mut failed = false;
 
     for (repo, outcome) in repos.iter().zip(outcomes) {
@@ -162,9 +162,18 @@ fn select<'a>(manifest: &'a Manifest, names: &[String]) -> Result<Vec<&'a Repo>>
 }
 
 fn list(gh: &Gh, manifest: &Manifest) -> Result<ExitCode> {
-    for repo in &manifest.repos {
+    let shared = &manifest.release_workflow;
+    let releases = in_parallel(&manifest.repos, |repo| {
+        shared.caller(gh, &manifest.owner, &repo.name)
+    });
+    for (repo, release) in manifest.repos.iter().zip(releases) {
         let tags: Vec<_> = repo.tags.iter().map(|t| format!("#{t}")).collect();
-        println!("{:<24} {}", repo.name, tags.join(" "));
+        let release = match release {
+            Ok(Some(release)) => format!("{}: {}", shared.name, release.describe()),
+            Ok(None) => String::new(),
+            Err(err) => format!("error: {err:#}"),
+        };
+        println!("{:<20} {:<16} {release}", repo.name, tags.join(" "));
     }
 
     let unmanaged: Vec<_> = gh

@@ -5,7 +5,7 @@ use serde_json::{Map, Value};
 
 use crate::diff::subset;
 use crate::gh::Gh;
-use crate::manifest::{Repo, Ruleset};
+use crate::manifest::{Manifest, Needs, Repo, Ruleset};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
@@ -40,9 +40,23 @@ pub struct Outcome {
 /// Compares one repository against the manifest and, in apply mode, fixes it.
 ///
 /// Each section is handled on its own, so one failing doesn't hide drift in the others.
-pub fn reconcile(gh: &Gh, owner: &str, repo: &Repo, mode: Mode) -> Outcome {
+pub fn reconcile(gh: &Gh, manifest: &Manifest, repo: &Repo, mode: Mode) -> Outcome {
+    let owner = manifest.owner.as_str();
     let base = format!("repos/{owner}/{}", repo.name);
     let mut outcome = Outcome::default();
+
+    let shared = &manifest.release_workflow;
+    let release = match shared.caller(gh, owner, &repo.name) {
+        Ok(release) => release,
+        Err(err) => {
+            outcome.errors.push(format!("{err:#}"));
+            None
+        }
+    };
+    if let Some(release) = &release {
+        outcome.manual.extend(shared.problems(release));
+    }
+    let needs = manifest.needs(repo, release.as_ref());
 
     if !repo.settings.is_empty() {
         let result = gh.get(&base).and_then(|actual| {
@@ -86,30 +100,27 @@ pub fn reconcile(gh: &Gh, owner: &str, repo: &Repo, mode: Mode) -> Outcome {
         }
     }
 
-    if !repo.variables.is_empty() {
-        let result = variables_drift(gh, mode, &base, repo);
+    if !needs.variables.is_empty() {
+        let result = variables_drift(gh, mode, &base, &needs);
         outcome.record(result);
     }
 
-    if !repo.secrets.is_empty() || !repo.forbidden_secrets.is_empty() {
+    if !needs.secrets.is_empty() || !needs.forbidden_secrets.is_empty() {
         let result = gh
             .get(&format!("{base}/actions/secrets?per_page=100"))
-            .and_then(|actual| secrets_drift(gh, mode, owner, repo, &actual, &mut outcome.manual));
+            .and_then(|actual| {
+                secrets_drift(gh, mode, owner, repo, &needs, &actual, &mut outcome.manual)
+            });
         outcome.record(result);
     }
 
-    if !repo.environments.is_empty() {
-        let result = environments_drift(gh, mode, &base, repo);
+    if !needs.environments.is_empty() {
+        let result = environments_drift(gh, mode, &base, &needs);
         outcome.record(result);
     }
 
-    if repo.release_workflow.is_some() {
-        let result = crate::workflow::drift(gh, mode, owner, repo);
-        outcome.record(result);
-    }
-
-    if repo.release_tag_prefix.is_some() || !repo.release_targets.is_empty() {
-        match crate::release::check(gh, owner, repo) {
+    if repo.release_tag_prefix.is_some() {
+        match crate::release::check(gh, owner, repo, &needs) {
             Ok(findings) => {
                 outcome.manual.extend(findings.problems);
                 outcome.pending.extend(findings.pending);
@@ -184,14 +195,14 @@ fn ruleset_drift(
     Ok(drift)
 }
 
-fn variables_drift(gh: &Gh, mode: Mode, base: &str, repo: &Repo) -> Result<Vec<String>> {
+fn variables_drift(gh: &Gh, mode: Mode, base: &str, needs: &Needs) -> Result<Vec<String>> {
     let actual = gh.get(&format!("{base}/actions/variables?per_page=100"))?;
     let actual = actual["variables"]
         .as_array()
         .context("unexpected variables response")?;
     let mut drift = Vec::new();
 
-    for (name, value) in &repo.variables {
+    for (name, value) in &needs.variables {
         let body = serde_json::json!({ "name": name, "value": value });
         match actual.iter().find(|v| v["name"] == name.as_str()) {
             None => {
@@ -222,7 +233,7 @@ fn variables_drift(gh: &Gh, mode: Mode, base: &str, repo: &Repo) -> Result<Vec<S
 
 /// Missing environments are created bare: no protection rules or branch
 /// policy, so the jobs using them run without waiting.
-fn environments_drift(gh: &Gh, mode: Mode, base: &str, repo: &Repo) -> Result<Vec<String>> {
+fn environments_drift(gh: &Gh, mode: Mode, base: &str, needs: &Needs) -> Result<Vec<String>> {
     let actual = gh.get(&format!("{base}/environments?per_page=100"))?;
     let names: Vec<&str> = actual["environments"]
         .as_array()
@@ -231,7 +242,7 @@ fn environments_drift(gh: &Gh, mode: Mode, base: &str, repo: &Repo) -> Result<Ve
         .filter_map(|e| e["name"].as_str())
         .collect();
     let mut drift = Vec::new();
-    for name in &repo.environments {
+    for name in &needs.environments {
         if names.contains(&name.as_str()) {
             continue;
         }
@@ -251,6 +262,7 @@ fn secrets_drift(
     mode: Mode,
     owner: &str,
     repo: &Repo,
+    needs: &Needs,
     actual: &Value,
     manual: &mut Vec<String>,
 ) -> Result<Vec<String>> {
@@ -268,7 +280,7 @@ fn secrets_drift(
             update_secrets: true
         }
     );
-    for (name, file) in &repo.secrets {
+    for (name, file) in &needs.secrets {
         let exists = names.contains(&name.as_str());
         if exists && !update_existing {
             continue;
@@ -295,7 +307,8 @@ fn secrets_drift(
     }
 
     manual.extend(
-        repo.forbidden_secrets
+        needs
+            .forbidden_secrets
             .iter()
             .filter(|s| names.contains(&s.as_str()))
             .map(|s| format!("secret {s}: should be removed")),

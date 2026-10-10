@@ -15,10 +15,12 @@ name: Rust release
 #       secrets: inherit
 #       with:
 #         crates-io: true
+#         binaries: true
 #
-# The inputs follow the repo's tags in forge.toml. Binaries are built and
-# tested before anything is published, so a broken target stops the release
-# before crates.io has it. The GitHub release is created last with every
+# The inputs are where a repo says what it ships; forge reads them to set up
+# what each one needs (secrets, the release environment) and to check the
+# result. Binaries are built before anything is published, so a broken target
+# stops the release before crates.io has it. The GitHub release is created last with every
 # archive attached, so a release that exists is complete.
 #
 # crates.io trusted publishing matches the caller's workflow file, so it stays
@@ -31,27 +33,38 @@ on:
         description: Publish to crates.io through trusted publishing.
         type: boolean
         default: false
-      targets:
+      binaries:
         description: >-
-          Space-separated targets to build {repo}-vX.Y.Z-{target} archives for
-          (.tar.gz, or .zip on Windows). Empty builds none.
-        type: string
-        default: ""
+          Attach {repo}-vX.Y.Z-{target} archives (.tar.gz, or .zip on Windows)
+          for each of BINARIES_TARGETS to the GitHub release.
+        type: boolean
+        default: false
       homebrew:
         description: Open a PR bumping Formula/{repo}.rb in lkurcak/homebrew-tap.
         type: boolean
         default: false
       winget:
         description: >-
-          Submit lkurcak.{repo} to winget-pkgs from the windows-msvc zips. The
-          first version has to be submitted by hand (komac new), since the
-          action only updates existing packages.
+          Build WINGET_TARGETS and submit lkurcak.{repo} to winget-pkgs from
+          them. The first version has to be submitted with forge's
+          scripts/winget-new.sh, since the action only updates existing
+          packages.
         type: boolean
         default: false
 
 env:
   CARGO_TERM_COLOR: always
   REPO: ${{ github.event.repository.name }}
+  # What each input builds; forge reads {INPUT}_TARGETS to check releases
+  # have every archive.
+  BINARIES_TARGETS: >-
+    aarch64-apple-darwin
+    aarch64-unknown-linux-gnu
+    x86_64-unknown-linux-gnu
+    x86_64-pc-windows-msvc
+  WINGET_TARGETS: >-
+    x86_64-pc-windows-msvc
+    aarch64-pc-windows-msvc
 
 jobs:
   verify:
@@ -61,6 +74,7 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
       matrix: ${{ steps.matrix.outputs.matrix }}
+      binaries: ${{ steps.matrix.outputs.any }}
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -77,10 +91,14 @@ jobs:
       - name: Pick a runner per target
         id: matrix
         env:
-          TARGETS: ${{ inputs.targets }}
+          BINARIES: ${{ inputs.binaries }}
+          WINGET: ${{ inputs.winget }}
         run: |
+          targets=
+          [ "$BINARIES" = true ] && targets="$targets $BINARIES_TARGETS"
+          [ "$WINGET" = true ] && targets="$targets $WINGET_TARGETS"
           include='[]'
-          for target in $TARGETS; do
+          for target in $(tr ' ' '\n' <<<"$targets" | awk 'NF && !seen[$0]++'); do
             case "$target" in
               *-apple-darwin)              os=macos-latest ;;
               aarch64-unknown-linux-*)     os=ubuntu-24.04-arm ;;
@@ -92,12 +110,13 @@ jobs:
             include=$(jq -c --arg t "$target" --arg os "$os" '. + [{target: $t, os: $os}]' <<<"$include")
           done
           echo "matrix=$(jq -c '{include: .}' <<<"$include")" >> "$GITHUB_OUTPUT"
+          echo "any=$(jq 'length > 0' <<<"$include")" >> "$GITHUB_OUTPUT"
       - if: inputs.crates-io
         run: cargo publish --dry-run --locked
 
   build:
     needs: verify
-    if: inputs.targets != ''
+    if: needs.verify.outputs.binaries == 'true'
     strategy:
       fail-fast: true
       matrix: ${{ fromJSON(needs.verify.outputs.matrix) }}
@@ -163,7 +182,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - if: inputs.targets != ''
+      - if: needs.verify.outputs.binaries == 'true'
         uses: actions/download-artifact@v8
         with:
           path: dist

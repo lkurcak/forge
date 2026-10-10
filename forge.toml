@@ -12,6 +12,34 @@ owner = "lkurcak"
 # latest release.
 release_tag_prefix = "v"
 
+# The release pipeline Rust repos share. A repo opts in by calling it from its
+# own .github/workflows/release.yml, and says there what it ships through the
+# workflow's inputs (crates-io, binaries, homebrew, winget):
+#
+#   jobs:
+#     release:
+#       uses: lkurcak/forge/.github/workflows/rust-release.yml@v1
+#       permissions:
+#         contents: write
+#         id-token: write
+#       secrets: inherit
+#       with:
+#         crates-io: true
+#         binaries: true
+#
+# forge reads that call. The repo gets the tag `rust-release`, plus a tag per
+# input set to true, so the tables below apply to it as if it were tagged in
+# this file. Calls must use this exact ref; `v1` moves along with compatible
+# changes to the workflow.
+#
+# Releases are then checked to have the archives the workflow builds
+# ({repo}-vX.Y.Z-{target}.tar.gz, .zip on Windows; the targets are the
+# workflow's BINARIES_TARGETS and WINGET_TARGETS), and to have reached the package
+# managers: crates.io's newest version, Formula/{repo}.rb in homebrew-tap, and
+# {owner}.{repo} in winget-pkgs. A PR still delivering a release shows as
+# pending.
+release_workflow = "lkurcak/forge/.github/workflows/rust-release.yml@v1"
+
 # Rulesets are opt-in per repo: `rulesets = [...]` names files in rulesets/,
 # without the .json extension.
 #   protect-default-branch  no deleting or force-pushing the default branch
@@ -37,21 +65,11 @@ default_workflow_permissions = "read"
 # Nothing needs workflows to open PRs yet (release-plz would).
 can_approve_pull_request_reviews = false
 
-# Repos with this tag release through forge's shared workflow
-# (.github/workflows/rust-release.yml): their own .github/workflows/release.yml
-# only calls it, and forge renders that file from the repo's tags. A tag's
-# `release_inputs` become workflow inputs; `release_targets` become `targets`.
-# `@v1` moves along with compatible changes to the shared workflow.
-[tags.rust-release]
-release_workflow = "lkurcak/forge/.github/workflows/rust-release.yml@v1"
 # Its crates.io and Homebrew jobs run in this environment, and crates.io's
 # trusted publisher is configured for it (workflow release.yml, environment
 # release). forge can't see the crates.io side; set it in the crate's settings.
+[tags.rust-release]
 environments = ["release"]
-
-# Also checked: crates.io's newest version is the latest release.
-[tags.crates-io]
-release_inputs = { crates-io = true }
 
 # Formula bumps go through the tap GitHub App, never personal access tokens.
 # The App only needs to be installed on homebrew-tap.
@@ -62,51 +80,34 @@ release_inputs = { crates-io = true }
 variables = { TAP_APP_ID = "5098195" }
 secrets = { TAP_APP_PRIVATE_KEY = "~/.config/forge/tap-app.pem" }
 forbidden_secrets = ["HOMEBREW_TAP_TOKEN", "TAP_GITHUB_TOKEN"]
-# Also checked: Formula/{repo}.rb points at the latest release, or a PR bumps it.
-release_inputs = { homebrew = true }
 
 # winget submissions are PRs to microsoft/winget-pkgs from a fork, which a
 # GitHub App can't open, so this is a classic personal access token with
 # `public_repo` and `workflow` scopes. When it expires, renew it, save it to
-# the file and run `forge apply --update-secrets`.
+# the file and run `forge apply --update-secrets`. The first version of a
+# package has to be submitted with scripts/winget-new.sh.
 [tags.winget]
 secrets = { WINGET_PAT = "~/.config/forge/winget-pat" }
-# The winget package installs from these zips, one per architecture. They add
-# to the `binaries` targets.
-release_targets = ["x86_64-pc-windows-msvc", "aarch64-pc-windows-msvc"]
-# Also checked: winget-pkgs has the latest release as {owner}.{repo}, or a PR
-# adds it. The first version has to be submitted with scripts/winget-new.sh.
-release_inputs = { winget = true }
-
-# The latest release must include a binary archive per target, named
-# {repo}-vX.Y.Z-{target}.tar.gz (.zip on Windows); `*` matches anything.
-# A repo can replace the list with its own `release_targets`.
-[tags.binaries]
-release_targets = [
-  "aarch64-apple-darwin",
-  "aarch64-unknown-linux-gnu",
-  "x86_64-unknown-linux-gnu",
-  "x86_64-pc-windows-msvc",
-]
 
 # Published
 
 [repos.gud]
-tags = ["rust", "rust-release", "crates-io", "homebrew", "binaries", "winget"]
+tags = ["rust"]
 rulesets = ["protect-default-branch"]
 
 [repos.tend]
-tags = ["rust", "rust-release", "crates-io", "homebrew", "binaries", "winget"]
+tags = ["rust"]
 rulesets = ["require-pr"]
 
-# Not `binaries`: its source repo is private, so the archives are published on
-# homebrew-tap's typr-dist-vX.Y.Z releases instead.
+# Its source repo is private, so the archives are published on homebrew-tap's
+# typr-dist-vX.Y.Z releases instead.
 [repos.typr]
 tags = ["rust", "homebrew"]
 
+# Not on the shared workflow, so its archives are listed here. OCaml builds
+# Windows binaries with MinGW.
 [repos.ocalc]
-tags = ["ocaml", "homebrew", "binaries"]
-# OCaml builds Windows binaries with MinGW.
+tags = ["ocaml", "homebrew"]
 release_targets = [
   "aarch64-apple-darwin",
   "aarch64-unknown-linux-gnu",
@@ -115,13 +116,14 @@ release_targets = [
 ]
 
 [repos.folktime]
-tags = ["rust", "rust-release", "crates-io"]
+tags = ["rust"]
 
 [repos.split-paragraphs]
-tags = ["rust", "rust-release", "crates-io"]
+tags = ["rust"]
 
+# Publishes the auburn2d and auburn3d crates with its own workflow.
 [repos.auburn]
-tags = ["rust", "crates-io"]
+tags = ["rust"]
 
 [repos.math]
 tags = ["rust"]

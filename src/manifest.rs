@@ -6,6 +6,8 @@ use anyhow::{Context, Result};
 use serde::Deserialize;
 use serde_json::{Map, Value};
 
+use crate::workflow::{Release, SharedWorkflow};
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RawManifest {
@@ -17,6 +19,9 @@ struct RawManifest {
     #[serde(default)]
     actions: Map<String, Value>,
     release_tag_prefix: Option<String>,
+    /// `uses:` reference to the shared release workflow, which lives next to
+    /// the manifest.
+    release_workflow: String,
     #[serde(default)]
     tags: BTreeMap<String, RawTag>,
     #[serde(default)]
@@ -37,14 +42,6 @@ struct RawTag {
     /// Deployment environments that must exist.
     #[serde(default)]
     environments: Vec<String>,
-    #[serde(default)]
-    release_targets: Vec<String>,
-    /// The reusable workflow repos with this tag release through, as a
-    /// `uses:` reference.
-    release_workflow: Option<String>,
-    /// Inputs this tag passes to the release workflow.
-    #[serde(default)]
-    release_inputs: BTreeMap<String, Value>,
 }
 
 #[derive(Deserialize)]
@@ -53,7 +50,10 @@ struct RawRepo {
     #[serde(default)]
     tags: Vec<String>,
     rulesets: Option<Vec<String>>,
-    release_targets: Option<Vec<String>>,
+    /// For repos releasing without the shared workflow, which otherwise
+    /// decides the targets.
+    #[serde(default)]
+    release_targets: Vec<String>,
     release_tag_prefix: Option<String>,
     /// `false` for repos whose GitHub releases aren't versions of the project,
     /// like a Homebrew tap storing bottles.
@@ -68,6 +68,8 @@ struct RawRepo {
 pub struct Manifest {
     pub owner: String,
     pub repos: Vec<Repo>,
+    pub release_workflow: SharedWorkflow,
+    tags: BTreeMap<String, Tag>,
 }
 
 /// A repository with the manifest defaults already merged in.
@@ -77,25 +79,36 @@ pub struct Repo {
     pub settings: Map<String, Value>,
     pub actions: Map<String, Value>,
     pub rulesets: Vec<Ruleset>,
-    /// Actions variables and their values, from the repo's tags.
-    pub variables: BTreeMap<String, String>,
-    /// Actions secrets that must exist and the local files holding their
-    /// values, from the repo's tags.
-    pub secrets: BTreeMap<String, PathBuf>,
-    /// Actions secrets that must not exist, from the repo's tags.
-    pub forbidden_secrets: Vec<String>,
-    /// Deployment environments that must exist, from the repo's tags.
-    pub environments: Vec<String>,
     /// What the latest release's tag must start with, followed by the version.
+    /// `None` for repos without versioned releases.
     pub release_tag_prefix: Option<String>,
-    /// Targets the latest release must have a binary archive for; `*` matches
-    /// anything.
+    /// Targets the latest release must have a binary archive for, besides the
+    /// ones its release workflow builds; `*` matches anything.
     pub release_targets: Vec<String>,
-    /// The reusable workflow `.github/workflows/release.yml` must call, from
-    /// the repo's tags.
-    pub release_workflow: Option<String>,
-    /// Inputs `release.yml` passes to it, from the repo's tags.
-    pub release_inputs: BTreeMap<String, Value>,
+}
+
+struct Tag {
+    variables: BTreeMap<String, String>,
+    secrets: BTreeMap<String, PathBuf>,
+    forbidden_secrets: Vec<String>,
+    environments: Vec<String>,
+}
+
+/// What a repository needs, from its manifest tags plus the tags its
+/// `release.yml` implies.
+#[derive(Default)]
+pub struct Needs {
+    pub tags: Vec<String>,
+    /// Actions variables and their values.
+    pub variables: BTreeMap<String, String>,
+    /// Actions secrets that must exist and the local files holding their values.
+    pub secrets: BTreeMap<String, PathBuf>,
+    /// Actions secrets that must not exist.
+    pub forbidden_secrets: Vec<String>,
+    /// Deployment environments that must exist.
+    pub environments: Vec<String>,
+    /// Targets the latest release must have a binary archive for.
+    pub release_targets: Vec<String>,
 }
 
 #[derive(Clone)]
@@ -111,10 +124,8 @@ impl Manifest {
             fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
         let raw: RawManifest =
             toml::from_str(&text).with_context(|| format!("parsing {}", path.display()))?;
-        let rulesets_dir = path
-            .parent()
-            .unwrap_or_else(|| Path::new("."))
-            .join("rulesets");
+        let dir = path.parent().unwrap_or_else(|| Path::new("."));
+        let rulesets_dir = dir.join("rulesets");
 
         let mut loaded: BTreeMap<String, Ruleset> = BTreeMap::new();
         let mut load_ruleset = |name: &str| -> Result<Ruleset> {
@@ -151,41 +162,12 @@ impl Manifest {
                 .map(|r| load_ruleset(r))
                 .collect::<Result<_>>()?;
 
-            let mut variables = BTreeMap::new();
-            let mut secrets = BTreeMap::new();
-            let mut forbidden_secrets = Vec::new();
-            let mut environments: Vec<String> = Vec::new();
-            let mut release_targets = Vec::new();
-            let mut release_workflow = None;
-            let mut release_inputs = BTreeMap::new();
-            for tag in repo.tags.iter().filter_map(|t| raw.tags.get(t)) {
-                variables.extend(tag.variables.clone());
-                secrets.extend(tag.secrets.iter().map(|(k, v)| (k.clone(), expand_home(v))));
-                forbidden_secrets.extend(tag.forbidden_secrets.iter().cloned());
-                for env in &tag.environments {
-                    if !environments.contains(env) {
-                        environments.push(env.clone());
-                    }
-                }
-                for target in &tag.release_targets {
-                    if !release_targets.contains(target) {
-                        release_targets.push(target.clone());
-                    }
-                }
-                release_workflow = release_workflow.or_else(|| tag.release_workflow.clone());
-                release_inputs.extend(tag.release_inputs.clone());
-            }
-
             repos.push(Repo {
                 name,
                 tags: repo.tags,
                 settings,
                 actions,
                 rulesets,
-                variables,
-                secrets,
-                forbidden_secrets,
-                environments,
                 release_tag_prefix: if repo.releases {
                     repo.release_tag_prefix
                         .or_else(|| raw.release_tag_prefix.clone())
@@ -193,19 +175,83 @@ impl Manifest {
                     None
                 },
                 release_targets: if repo.releases {
-                    repo.release_targets.unwrap_or(release_targets)
+                    repo.release_targets
                 } else {
                     Vec::new()
                 },
-                release_workflow,
-                release_inputs,
             });
         }
+
+        let tags = raw
+            .tags
+            .into_iter()
+            .map(|(name, tag)| {
+                let tag = Tag {
+                    variables: tag.variables,
+                    secrets: tag
+                        .secrets
+                        .iter()
+                        .map(|(k, v)| (k.clone(), expand_home(v)))
+                        .collect(),
+                    forbidden_secrets: tag.forbidden_secrets,
+                    environments: tag.environments,
+                };
+                (name, tag)
+            })
+            .collect();
 
         Ok(Self {
             owner: raw.owner,
             repos,
+            release_workflow: SharedWorkflow::load(dir, &raw.release_workflow)?,
+            tags,
         })
+    }
+
+    /// Merges the requirements of the repo's tags. A repo calling the shared
+    /// workflow also gets a tag named after it, and one per input it turns on.
+    pub fn needs(&self, repo: &Repo, release: Option<&Release>) -> Needs {
+        let mut needs = Needs::default();
+        let add_tag = |needs: &mut Needs, tag: &str| {
+            if !needs.tags.iter().any(|t| t == tag) {
+                needs.tags.push(tag.to_owned());
+            }
+        };
+        for tag in &repo.tags {
+            add_tag(&mut needs, tag);
+        }
+        if let Some(release) = release {
+            add_tag(&mut needs, &self.release_workflow.name);
+            for input in release.enabled() {
+                add_tag(&mut needs, input);
+            }
+        }
+
+        for tag in needs.tags.clone().iter().filter_map(|t| self.tags.get(t)) {
+            needs.variables.extend(tag.variables.clone());
+            needs.secrets.extend(tag.secrets.clone());
+            push_new(&mut needs.forbidden_secrets, &tag.forbidden_secrets);
+            push_new(&mut needs.environments, &tag.environments);
+        }
+
+        if repo.release_tag_prefix.is_some() {
+            push_new(&mut needs.release_targets, &repo.release_targets);
+            if let Some(release) = release {
+                push_new(
+                    &mut needs.release_targets,
+                    &self.release_workflow.targets(release),
+                );
+            }
+        }
+        needs
+    }
+}
+
+fn push_new(list: &mut Vec<String>, items: &[String]) {
+    for item in items {
+        if !list.contains(item) {
+            list.push(item.clone());
+        }
     }
 }
 

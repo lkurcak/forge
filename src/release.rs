@@ -9,7 +9,7 @@ use anyhow::{Context, Result, bail};
 use serde_json::Value;
 
 use crate::gh::Gh;
-use crate::manifest::Repo;
+use crate::manifest::{Needs, Repo};
 
 /// The repo holding the Homebrew formulas, under the manifest's owner.
 const TAP: &str = "homebrew-tap";
@@ -25,14 +25,14 @@ pub struct Findings {
 /// the package managers the repo's tags name.
 ///
 /// Archives are expected as `{repo}-{tag}-{target}.tar.gz`, or `.zip` on Windows.
-pub fn check(gh: &Gh, owner: &str, repo: &Repo) -> Result<Findings> {
+pub fn check(gh: &Gh, owner: &str, repo: &Repo, needs: &Needs) -> Result<Findings> {
     let base = format!("repos/{owner}/{}", repo.name);
     let mut findings = Findings::default();
     let release = match gh.get(&format!("{base}/releases/latest")) {
         Ok(release) => release,
         // Nothing published yet: only worth mentioning if binaries are expected.
         Err(err) if err.to_string().contains("(HTTP 404)") => {
-            if !repo.release_targets.is_empty() {
+            if !needs.release_targets.is_empty() {
                 findings.problems.push("release: none published yet".into());
             }
             return Ok(findings);
@@ -56,7 +56,7 @@ pub fn check(gh: &Gh, owner: &str, repo: &Repo) -> Result<Findings> {
         .flatten()
         .filter_map(|a| a["name"].as_str())
         .collect();
-    for target in &repo.release_targets {
+    for target in &needs.release_targets {
         let stem = format!("{}-{tag}-{target}", repo.name);
         let found = assets.iter().any(|name| {
             [".tar.gz", ".zip"].iter().any(|ext| {
@@ -77,7 +77,7 @@ pub fn check(gh: &Gh, owner: &str, repo: &Repo) -> Result<Findings> {
     else {
         return Ok(findings);
     };
-    let has = |tag: &str| repo.tags.iter().any(|t| t == tag);
+    let has = |tag: &str| needs.tags.iter().any(|t| t == tag);
     if has("crates-io") {
         crates_io(&repo.name, version, &mut findings)?;
     }

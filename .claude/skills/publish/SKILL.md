@@ -5,21 +5,23 @@ description: Publish one of lkurcak's Rust repos to a package manager (winget, H
 
 # Publishing a repo
 
-Everything about how a repo releases lives in `forge.toml`, as tags. The repo's own
-`.github/workflows/release.yml` is generated from them and only calls
-`.github/workflows/rust-release.yml` here. Adding a channel means adding a tag, letting
-forge fix the repo, and cutting a release.
+A Rust repo releases through forge's shared workflow,
+`.github/workflows/rust-release.yml` here. The repo's own
+`.github/workflows/release.yml` calls it, and the inputs it passes are where the repo
+says what it ships:
 
-| Tag | What it does |
+| Input | What it does |
 | --- | --- |
-| `rust-release` | Repo releases through the shared workflow (required for the rest) |
 | `crates-io` | `cargo publish` via trusted publishing |
-| `binaries` | `{repo}-vX.Y.Z-{target}` archives on the GitHub release |
+| `binaries` | `{repo}-vX.Y.Z-{target}` archives for `BINARIES_TARGETS` on the GitHub release |
 | `homebrew` | PR bumping `Formula/{repo}.rb` in `lkurcak/homebrew-tap` |
-| `winget` | x64 + arm64 Windows zips, submitted to winget-pkgs as `lkurcak.{repo}` |
+| `winget` | Builds `WINGET_TARGETS` (x64 + arm64 Windows) and submits `lkurcak.{repo}` to winget-pkgs |
 
-`forge check REPO` reports anything missing, including whether each channel has the latest
-release (open PRs show as `pending`).
+forge reads that call. Each input set to true counts as a tag in `forge.toml`, so
+`forge apply` sets up what it needs (the tap App secrets, `WINGET_PAT`, the `release`
+environment), and `forge check` reports what's missing, including whether each channel
+has the latest release (open PRs show as `pending`). Adding a channel means turning an
+input on, running `forge apply`, and cutting a release.
 
 ## Steps
 
@@ -27,8 +29,10 @@ release (open PRs show as `pending`).
    target in its tags (`cargo build --target …` problems show up only in CI otherwise):
    Windows-only or Unix-only code paths are the usual suspects. The binary must be named
    like the repo.
-2. **Tag it in `forge.toml`.** Add `rust-release` plus the channels. `winget` brings the
-   Windows targets with it; it doesn't need `binaries`, but most repos want both.
+2. **Turn the inputs on** in the repo's `.github/workflows/release.yml`. If it doesn't
+   call the shared workflow yet, replace the file with the call (copy gud's). The repo
+   must be in `forge.toml` (any tags; channels don't go there). Commit it with the rest
+   of the change.
 3. **One-time prerequisites per channel**, if the repo is new to it:
    - `crates-io`: the crate needs a trusted publisher on crates.io (repo, workflow
      `release.yml`, environment `release`). Only the owner can set it up, in the crate's
@@ -38,10 +42,9 @@ release (open PRs show as `pending`).
    - `homebrew`: `Formula/{repo}.rb` must exist in homebrew-tap (copy `gud.rb`). The tap
      App needs no change.
    - `winget`: nothing until after the first release (step 6).
-4. **Run `forge apply REPO`.** It sets secrets and variables and opens a PR generating
-   `release.yml`. Writing workflow files needs gh's `workflow` scope; if it fails on that,
-   have the user run `! gh auth refresh -h github.com -s workflow`. Merge the PR (ask the
-   user) and check `forge check REPO` shows no `release.yml` drift.
+4. **Run `forge apply REPO`** once the `release.yml` change is on the default branch. It
+   sets the secrets, variables and environment the inputs need. `forge check REPO` then
+   shows only release-side problems.
 5. **Release.** Bump the version in `Cargo.toml` (and `Cargo.lock`), add a CHANGELOG entry
    only for user-visible changes (new binaries or platforms count; CI changes don't), commit
    `release X.Y.Z`, tag `vX.Y.Z`. The user pushes — their SSH key has a passphrase — so give
@@ -58,9 +61,9 @@ release (open PRs show as `pending`).
 ## Changing the shared workflow
 
 Callers use `@v1`, a moving tag. For compatible changes, commit and move the tag
-(`git tag -f v1`; the user runs `git push origin main && git push -f origin v1`). An
-incompatible change (renamed or removed input) needs `v2` and the `rust-release` tag in
-`forge.toml` pointing at it, so `forge apply` migrates repos one PR at a time.
+(`git tag -f v1`; the user runs `git push origin main && git push -f origin v1`). For an
+incompatible change (renamed or removed input), point `release_workflow` in `forge.toml`
+at `v2`; `forge check` then lists every repo still calling `v1`, to migrate one by one.
 
-Runners per target are picked in the workflow's `verify` job; a new target needs a line
-there.
+Targets are the workflow's `{INPUT}_TARGETS` env lists, which forge reads too. Runners per
+target are picked in its `verify` job; a new target may need a line there.
