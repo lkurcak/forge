@@ -1,0 +1,143 @@
+name: Rust CI
+
+# The checks shared by every Rust repo forge manages. Each repo's ci.yml calls
+# it; triggers can't be shared, so they live there:
+#
+#   on:
+#     pull_request:
+#     push:
+#       branches: [main]
+#     schedule:
+#       - cron: "0 6 * * 1"
+#     workflow_dispatch:
+#   permissions:
+#     contents: read
+#   jobs:
+#     ci:
+#       uses: lkurcak/forge/.github/workflows/rust-ci.yml@v1
+#
+# Pull requests test the branch merged into main as it was then; the push run
+# tests what actually landed, which also covers direct pushes and is what the
+# release workflow relies on. The weekly run catches new stable Rust breaking
+# a repo nobody touched. A newer run of the same ref cancels an older one.
+#
+# Rust versions come from the repo, not from here: the MSRV job runs when
+# Cargo.toml sets rust-version, with that toolchain. Writing the version as an
+# input (not `dtolnay/rust-toolchain@1.85`) keeps Dependabot from bumping it.
+
+on:
+  workflow_call:
+    inputs:
+      check-targets:
+        description: >-
+          Space-separated extra targets to build for with
+          --no-default-features, like no_std or wasm ones.
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  fmt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - run: cargo fmt --all --check
+
+  clippy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --workspace --all-features --locked
+
+  doc:
+    runs-on: ubuntu-latest
+    env:
+      RUSTDOCFLAGS: -D warnings
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo doc --workspace --all-features --no-deps --locked
+
+  # What the release would upload to crates.io, for crates that can be
+  # published at all.
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Dry-run cargo publish
+        run: |
+          publishable=$(cargo metadata --no-deps --format-version 1 \
+            | jq '[.packages[] | select(.publish != [])] | length')
+          if [ "$publishable" -eq 0 ]; then
+            echo "Nothing here is published to crates.io"
+            exit 0
+          fi
+          cargo publish --workspace --dry-run --locked
+
+  msrv:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Read rust-version
+        id: msrv
+        run: |
+          msrv=$(cargo metadata --no-deps --format-version 1 \
+            | jq -r '[.packages[].rust_version // empty] | sort_by(split(".") | map(tonumber)) | last // empty')
+          echo "version=$msrv" >> "$GITHUB_OUTPUT"
+          [ -n "$msrv" ] || echo "No rust-version in Cargo.toml; nothing to check"
+      - if: steps.msrv.outputs.version != ''
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.msrv.outputs.version }}
+      - if: steps.msrv.outputs.version != ''
+        uses: Swatinem/rust-cache@v2
+      - if: steps.msrv.outputs.version != ''
+        run: cargo test --workspace --all-features --locked
+
+  check-targets:
+    if: inputs.check-targets != ''
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build
+        env:
+          TARGETS: ${{ inputs.check-targets }}
+        run: |
+          # shellcheck disable=SC2086 # one argument per target
+          rustup target add $TARGETS
+          for target in $TARGETS; do
+            cargo build --workspace --no-default-features --locked --target "$target"
+          done

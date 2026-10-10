@@ -19,9 +19,11 @@ forge apply [REPO…]   # fix drift
 - `[tags.<name>]` adds Actions variables and secrets to every repo with that tag.
   Secret values come from local files (e.g. `~/.config/forge/tap-app.pem`) and are
   only set when the secret is missing, since GitHub never reveals them.
-- Rust repos release through the shared
-  [`rust-release.yml`](.github/workflows/rust-release.yml), calling it from
-  their own `.github/workflows/release.yml`. The inputs they pass (`crates-io`,
+- Rust repos share their CI and release workflows,
+  [`rust-ci.yml`](.github/workflows/rust-ci.yml) and
+  [`rust-release.yml`](.github/workflows/rust-release.yml), calling them from
+  their own `.github/workflows/ci.yml` and `release.yml` (`[workflows]` in the
+  manifest). The inputs they pass (`crates-io`,
   `binaries`, `homebrew`, `winget`) are where they say what they ship. forge
   reads that call: each input turned on counts as a tag, so it brings that tag's
   secrets, and calling the workflow at all brings the `rust-release` tag.

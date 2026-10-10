@@ -6,7 +6,7 @@ use anyhow::{Context, Result};
 use serde::Deserialize;
 use serde_json::{Map, Value};
 
-use crate::workflow::{Release, SharedWorkflow};
+use crate::workflow::{Call, SharedWorkflow};
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -19,9 +19,10 @@ struct RawManifest {
     #[serde(default)]
     actions: Map<String, Value>,
     release_tag_prefix: Option<String>,
-    /// `uses:` reference to the shared release workflow, which lives next to
-    /// the manifest.
-    release_workflow: String,
+    /// Workflow file repos call a shared workflow from, to its `uses:`
+    /// reference. The shared workflows live next to the manifest.
+    #[serde(default)]
+    workflows: BTreeMap<String, String>,
     #[serde(default)]
     tags: BTreeMap<String, RawTag>,
     #[serde(default)]
@@ -68,7 +69,7 @@ struct RawRepo {
 pub struct Manifest {
     pub owner: String,
     pub repos: Vec<Repo>,
-    pub release_workflow: SharedWorkflow,
+    pub workflows: Vec<SharedWorkflow>,
     tags: BTreeMap<String, Tag>,
 }
 
@@ -203,14 +204,19 @@ impl Manifest {
         Ok(Self {
             owner: raw.owner,
             repos,
-            release_workflow: SharedWorkflow::load(dir, &raw.release_workflow)?,
+            workflows: raw
+                .workflows
+                .iter()
+                .map(|(caller, uses)| SharedWorkflow::load(dir, caller, uses))
+                .collect::<Result<_>>()?,
             tags,
         })
     }
 
-    /// Merges the requirements of the repo's tags. A repo calling the shared
+    /// Merges the requirements of the repo's tags. A repo calling a shared
     /// workflow also gets a tag named after it, and one per input it turns on.
-    pub fn needs(&self, repo: &Repo, release: Option<&Release>) -> Needs {
+    /// `calls` pairs with [`Self::workflows`].
+    pub fn needs(&self, repo: &Repo, calls: &[Option<Call>]) -> Needs {
         let mut needs = Needs::default();
         let add_tag = |needs: &mut Needs, tag: &str| {
             if !needs.tags.iter().any(|t| t == tag) {
@@ -220,10 +226,12 @@ impl Manifest {
         for tag in &repo.tags {
             add_tag(&mut needs, tag);
         }
-        if let Some(release) = release {
-            add_tag(&mut needs, &self.release_workflow.name);
-            for input in release.enabled() {
-                add_tag(&mut needs, input);
+        for (workflow, call) in self.workflows.iter().zip(calls) {
+            if let Some(call) = call {
+                add_tag(&mut needs, &workflow.name);
+                for input in call.enabled() {
+                    add_tag(&mut needs, input);
+                }
             }
         }
 
@@ -236,11 +244,10 @@ impl Manifest {
 
         if repo.release_tag_prefix.is_some() {
             push_new(&mut needs.release_targets, &repo.release_targets);
-            if let Some(release) = release {
-                push_new(
-                    &mut needs.release_targets,
-                    &self.release_workflow.targets(release),
-                );
+            for (workflow, call) in self.workflows.iter().zip(calls) {
+                if let Some(call) = call {
+                    push_new(&mut needs.release_targets, &workflow.targets(call));
+                }
             }
         }
         needs

@@ -45,18 +45,21 @@ pub fn reconcile(gh: &Gh, manifest: &Manifest, repo: &Repo, mode: Mode) -> Outco
     let base = format!("repos/{owner}/{}", repo.name);
     let mut outcome = Outcome::default();
 
-    let shared = &manifest.release_workflow;
-    let release = match shared.caller(gh, owner, &repo.name) {
-        Ok(release) => release,
-        Err(err) => {
-            outcome.errors.push(format!("{err:#}"));
-            None
+    let mut calls = Vec::new();
+    for workflow in &manifest.workflows {
+        let call = match workflow.call(gh, owner, &repo.name) {
+            Ok(call) => call,
+            Err(err) => {
+                outcome.errors.push(format!("{err:#}"));
+                None
+            }
+        };
+        if let Some(call) = &call {
+            outcome.manual.extend(workflow.problems(call));
         }
-    };
-    if let Some(release) = &release {
-        outcome.manual.extend(shared.problems(release));
+        calls.push(call);
     }
-    let needs = manifest.needs(repo, release.as_ref());
+    let needs = manifest.needs(repo, &calls);
 
     if !repo.settings.is_empty() {
         let result = gh.get(&base).and_then(|actual| {

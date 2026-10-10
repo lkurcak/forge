@@ -1,9 +1,10 @@
-//! The shared release workflow, and the repos calling it.
+//! The shared workflows, and the repos calling them.
 //!
-//! A repo's `.github/workflows/release.yml` is where it says what it ships:
-//! the inputs it passes to the shared workflow. forge only reads it, treating
-//! each input turned on as a tag (so `winget: true` brings the winget tag's
-//! secret), and checks it against the shared workflow itself.
+//! A repo opts into one by calling it from its own workflow file, and the
+//! inputs it passes are where it configures it (for the release workflow,
+//! what it ships). forge only reads the call, treating each input turned on
+//! as a tag (so `winget: true` brings the winget tag's secret), and checks it
+//! against the shared workflow itself.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -14,11 +15,11 @@ use serde_json::Value;
 
 use crate::gh::Gh;
 
-const CALLER: &str = ".github/workflows/release.yml";
-
 pub struct SharedWorkflow {
     /// The file's stem, which is also the tag of every repo calling it.
     pub name: String,
+    /// Where repos call it from, like `.github/workflows/release.yml`.
+    caller: String,
     /// `owner/repo/.github/workflows/file.yml`, as callers reference it.
     path: String,
     /// The ref callers must use.
@@ -28,13 +29,13 @@ pub struct SharedWorkflow {
     targets: BTreeMap<String, Vec<String>>,
 }
 
-/// A repo's call of the shared workflow.
-pub struct Release {
+/// A repo's call of a shared workflow.
+pub struct Call {
     git_ref: String,
     pub inputs: BTreeMap<String, Value>,
 }
 
-impl Release {
+impl Call {
     /// Inputs set to `true`.
     pub fn enabled(&self) -> impl Iterator<Item = &str> {
         self.inputs
@@ -58,15 +59,15 @@ impl Release {
 
 impl SharedWorkflow {
     /// Reads the workflow `uses` names from the repo `dir` holds, which must
-    /// be the one it lives in.
-    pub fn load(dir: &Path, uses: &str) -> Result<Self> {
+    /// be the one it lives in. Repos call it from `.github/workflows/{caller}`.
+    pub fn load(dir: &Path, caller: &str, uses: &str) -> Result<Self> {
         let (path, git_ref) = uses
             .split_once('@')
-            .with_context(|| format!("release_workflow {uses} needs an @ref"))?;
+            .with_context(|| format!("workflow {uses} needs an @ref"))?;
         let local = path
             .splitn(3, '/')
             .nth(2)
-            .with_context(|| format!("release_workflow {uses} isn't owner/repo/path@ref"))?;
+            .with_context(|| format!("workflow {uses} isn't owner/repo/path@ref"))?;
         let file = dir.join(local);
         let text =
             fs::read_to_string(&file).with_context(|| format!("reading {}", file.display()))?;
@@ -96,6 +97,7 @@ impl SharedWorkflow {
                 .and_then(|s| s.to_str())
                 .unwrap_or(local)
                 .to_owned(),
+            caller: format!(".github/workflows/{caller}"),
             path: path.to_owned(),
             git_ref: git_ref.to_owned(),
             inputs,
@@ -103,16 +105,16 @@ impl SharedWorkflow {
         })
     }
 
-    /// The repo's call of this workflow from its `release.yml`, if it has one.
-    pub fn caller(&self, gh: &Gh, owner: &str, repo: &str) -> Result<Option<Release>> {
-        let Some(text) = gh.file(&format!("{owner}/{repo}"), CALLER, None)? else {
+    /// The repo's call of this workflow, if it has one.
+    pub fn call(&self, gh: &Gh, owner: &str, repo: &str) -> Result<Option<Call>> {
+        let Some(text) = gh.file(&format!("{owner}/{repo}"), &self.caller, None)? else {
             return Ok(None);
         };
-        self.parse_caller(&text)
-            .with_context(|| format!("reading {repo}'s {CALLER}"))
+        self.parse_call(&text)
+            .with_context(|| format!("reading {repo}'s {}", self.caller))
     }
 
-    fn parse_caller(&self, text: &str) -> Result<Option<Release>> {
+    fn parse_call(&self, text: &str) -> Result<Option<Call>> {
         let yaml: Value = serde_yaml_ng::from_str(text)?;
         let calls: Vec<(&Value, &str)> = yaml["jobs"]
             .as_object()
@@ -131,7 +133,7 @@ impl SharedWorkflow {
             [call] => *call,
             _ => bail!("calls {} more than once", self.path),
         };
-        Ok(Some(Release {
+        Ok(Some(Call {
             git_ref: git_ref.to_owned(),
             inputs: job["with"]
                 .as_object()
@@ -140,26 +142,29 @@ impl SharedWorkflow {
     }
 
     /// What's wrong with a repo's call; the repo has to fix these itself.
-    pub fn problems(&self, release: &Release) -> Vec<String> {
+    pub fn problems(&self, call: &Call) -> Vec<String> {
         let mut problems = Vec::new();
-        if release.git_ref != self.git_ref {
+        if call.git_ref != self.git_ref {
             problems.push(format!(
-                "{CALLER}: calls {}@{}, should be @{}",
-                self.name, release.git_ref, self.git_ref
+                "{}: calls {}@{}, should be @{}",
+                self.caller, self.name, call.git_ref, self.git_ref
             ));
         }
-        for input in release.inputs.keys() {
+        for input in call.inputs.keys() {
             if !self.inputs.contains(input) {
-                problems.push(format!("{CALLER}: {} has no input {input}", self.name));
+                problems.push(format!(
+                    "{}: {} has no input {input}",
+                    self.caller, self.name
+                ));
             }
         }
         problems
     }
 
-    /// Targets the release has archives for, in the workflow's order.
-    pub fn targets(&self, release: &Release) -> Vec<String> {
+    /// Targets the call builds release archives for, in the workflow's order.
+    pub fn targets(&self, call: &Call) -> Vec<String> {
         let mut targets: Vec<String> = Vec::new();
-        for input in release.enabled() {
+        for input in call.enabled() {
             for target in self.targets.get(input).into_iter().flatten() {
                 if !targets.contains(target) {
                     targets.push(target.clone());
@@ -177,6 +182,7 @@ mod tests {
     fn shared() -> SharedWorkflow {
         SharedWorkflow::load(
             Path::new(env!("CARGO_MANIFEST_DIR")),
+            "release.yml",
             "lkurcak/forge/.github/workflows/rust-release.yml@v1",
         )
         .unwrap()
@@ -209,7 +215,7 @@ jobs:
     #[test]
     fn reads_a_call() {
         let shared = shared();
-        let release = shared.parse_caller(CALL).unwrap().unwrap();
+        let release = shared.parse_call(CALL).unwrap().unwrap();
         assert_eq!(
             release.enabled().collect::<Vec<_>>(),
             ["binaries", "winget"]
@@ -225,13 +231,13 @@ jobs:
     fn flags_bad_calls() {
         let shared = shared();
         let call = CALL.replace("@v1", "@main").replace("winget:", "wignet:");
-        let release = shared.parse_caller(&call).unwrap().unwrap();
+        let release = shared.parse_call(&call).unwrap().unwrap();
         assert_eq!(shared.problems(&release).len(), 2);
     }
 
     #[test]
     fn ignores_other_workflows() {
         let call = "jobs:\n  build:\n    runs-on: ubuntu-latest\n";
-        assert!(shared().parse_caller(call).unwrap().is_none());
+        assert!(shared().parse_call(call).unwrap().is_none());
     }
 }

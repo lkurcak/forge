@@ -162,18 +162,28 @@ fn select<'a>(manifest: &'a Manifest, names: &[String]) -> Result<Vec<&'a Repo>>
 }
 
 fn list(gh: &Gh, manifest: &Manifest) -> Result<ExitCode> {
-    let shared = &manifest.release_workflow;
-    let releases = in_parallel(&manifest.repos, |repo| {
-        shared.caller(gh, &manifest.owner, &repo.name)
+    let calls = in_parallel(&manifest.repos, |repo| {
+        manifest
+            .workflows
+            .iter()
+            .map(
+                |workflow| match workflow.call(gh, &manifest.owner, &repo.name) {
+                    Ok(Some(call)) => Some(format!("{}: {}", workflow.name, call.describe())),
+                    Ok(None) => None,
+                    Err(err) => Some(format!("error: {err:#}")),
+                },
+            )
+            .collect::<Vec<_>>()
     });
-    for (repo, release) in manifest.repos.iter().zip(releases) {
+    for (repo, calls) in manifest.repos.iter().zip(calls) {
         let tags: Vec<_> = repo.tags.iter().map(|t| format!("#{t}")).collect();
-        let release = match release {
-            Ok(Some(release)) => format!("{}: {}", shared.name, release.describe()),
-            Ok(None) => String::new(),
-            Err(err) => format!("error: {err:#}"),
-        };
-        println!("{:<20} {:<16} {release}", repo.name, tags.join(" "));
+        let calls: Vec<_> = calls.into_iter().flatten().collect();
+        println!(
+            "{:<20} {:<16} {}",
+            repo.name,
+            tags.join(" "),
+            calls.join(" | ")
+        );
     }
 
     let unmanaged: Vec<_> = gh

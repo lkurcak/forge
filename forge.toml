@@ -12,9 +12,9 @@ owner = "lkurcak"
 # latest release.
 release_tag_prefix = "v"
 
-# The release pipeline Rust repos share. A repo opts in by calling it from its
-# own .github/workflows/release.yml, and says there what it ships through the
-# workflow's inputs (crates-io, binaries, homebrew, winget):
+# Workflows Rust repos share, keyed by the file in .github/workflows/ a repo
+# calls them from. A repo opts in by making that file a call, and configures
+# the workflow through its inputs, e.g. what a release ships:
 #
 #   jobs:
 #     release:
@@ -27,18 +27,20 @@ release_tag_prefix = "v"
 #         crates-io: true
 #         binaries: true
 #
-# forge reads that call. The repo gets the tag `rust-release`, plus a tag per
-# input set to true, so the tables below apply to it as if it were tagged in
-# this file. Calls must use this exact ref; `v1` moves along with compatible
-# changes to the workflow.
+# forge reads those calls. The repo gets a tag named after each workflow it
+# calls (`rust-release`, `rust-ci`), plus a tag per input set to true, so the
+# tables below apply to it as if it were tagged in this file. Calls must use
+# the ref given here; `v1` moves along with compatible changes.
 #
 # Releases are then checked to have the archives the workflow builds
-# ({repo}-vX.Y.Z-{target}.tar.gz, .zip on Windows; the targets are the
-# workflow's BINARIES_TARGETS and WINGET_TARGETS), and to have reached the package
-# managers: crates.io's newest version, Formula/{repo}.rb in homebrew-tap, and
+# ({repo}-vX.Y.Z-{target}.tar.gz, .zip on Windows; the targets are the release
+# workflow's {INPUT}_TARGETS lists), and to have reached the package managers:
+# crates.io's newest version, Formula/{repo}.rb in homebrew-tap, and
 # {owner}.{repo} in winget-pkgs. A PR still delivering a release shows as
 # pending.
-release_workflow = "lkurcak/forge/.github/workflows/rust-release.yml@v1"
+[workflows]
+"release.yml" = "lkurcak/forge/.github/workflows/rust-release.yml@v1"
+"ci.yml" = "lkurcak/forge/.github/workflows/rust-ci.yml@v1"
 
 # Rulesets are opt-in per repo: `rulesets = [...]` names files in rulesets/,
 # without the .json extension.
