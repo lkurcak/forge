@@ -30,7 +30,9 @@ on:
   workflow_call:
     inputs:
       crates-io:
-        description: Publish to crates.io through trusted publishing.
+        description: >-
+          Publish every crate in the workspace that can be published to
+          crates.io, through trusted publishing.
         type: boolean
         default: false
       binaries:
@@ -78,13 +80,18 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
+      # Every crate that gets published shares the version (all of them, if
+      # none is published).
       - name: Check tag matches Cargo.toml version
         id: version
         run: |
-          version=$(cargo metadata --no-deps --format-version 1 \
-            | jq -r --arg name "$REPO" '[.packages[] | select(.name == $name)][0] // .packages[0] | .version')
-          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
-            echo "::error::Tag $GITHUB_REF_NAME does not match Cargo.toml version v$version"
+          version=${GITHUB_REF_NAME#v}
+          mismatched=$(cargo metadata --no-deps --format-version 1 \
+            | jq -r --arg v "$version" '.packages as $all
+                | [$all[] | select(.publish != [])] | if length > 0 then . else $all end
+                | .[] | select(.version != $v) | "\(.name) \(.version)"')
+          if [ -n "$mismatched" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match Cargo.toml: $mismatched"
             exit 1
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
@@ -112,7 +119,7 @@ jobs:
           echo "matrix=$(jq -c '{include: .}' <<<"$include")" >> "$GITHUB_OUTPUT"
           echo "any=$(jq 'length > 0' <<<"$include")" >> "$GITHUB_OUTPUT"
       - if: inputs.crates-io
-        run: cargo publish --dry-run --locked
+        run: cargo publish --workspace --dry-run --locked
 
   build:
     needs: verify
@@ -171,7 +178,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: rust-lang/crates-io-auth-action@v1
         id: auth
-      - run: cargo publish --locked
+      - run: cargo publish --workspace --locked
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
 

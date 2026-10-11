@@ -28,6 +28,12 @@ name: Rust CI
 on:
   workflow_call:
     inputs:
+      bevy:
+        description: >-
+          The workspace builds Bevy (with --all-features, at least): install
+          the system libraries it needs on Linux (BEVY_LINUX_PACKAGES).
+        type: boolean
+        default: false
       no-std:
         description: >-
           The crate works without std: build it with --no-default-features
@@ -47,6 +53,11 @@ env:
   # Bare-metal ARM: anything reaching for std, in the crate or its
   # dependencies, fails to build here.
   NO_STD_TARGET: thumbv7em-none-eabi
+  # From Bevy's Linux setup guide: audio, input, windowing and GL.
+  BEVY_LINUX_PACKAGES: >-
+    libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev
+    libx11-dev libxrandr-dev libxcursor-dev libxi-dev libxinerama-dev
+    libegl1-mesa-dev libgl1-mesa-dev libgles2-mesa-dev
 
 jobs:
   fmt:
@@ -65,6 +76,11 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
+      - if: inputs.bevy && runner.os == 'Linux'
+        name: Install Bevy's Linux libraries
+        run: |
+          # shellcheck disable=SC2086 # one argument per package
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends $BEVY_LINUX_PACKAGES
       - uses: Swatinem/rust-cache@v2
       - run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 
@@ -77,6 +93,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
+      - if: inputs.bevy && runner.os == 'Linux'
+        name: Install Bevy's Linux libraries
+        run: |
+          # shellcheck disable=SC2086 # one argument per package
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends $BEVY_LINUX_PACKAGES
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --workspace --all-features --locked
 
@@ -87,6 +108,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
+      - if: inputs.bevy && runner.os == 'Linux'
+        name: Install Bevy's Linux libraries
+        run: |
+          # shellcheck disable=SC2086 # one argument per package
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends $BEVY_LINUX_PACKAGES
       - uses: Swatinem/rust-cache@v2
       - run: cargo doc --workspace --all-features --no-deps --locked
 
@@ -124,6 +150,11 @@ jobs:
         with:
           toolchain: ${{ steps.msrv.outputs.version }}
           targets: ${{ inputs.no-std && env.NO_STD_TARGET || '' }}
+      - if: inputs.bevy && runner.os == 'Linux'
+        name: Install Bevy's Linux libraries
+        run: |
+          # shellcheck disable=SC2086 # one argument per package
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends $BEVY_LINUX_PACKAGES
       - if: steps.msrv.outputs.version != ''
         uses: Swatinem/rust-cache@v2
       - if: steps.msrv.outputs.version != ''

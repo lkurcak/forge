@@ -79,7 +79,9 @@ pub fn check(gh: &Gh, owner: &str, repo: &Repo, needs: &Needs) -> Result<Finding
     };
     let has = |tag: &str| needs.tags.iter().any(|t| t == tag);
     if has("crates-io") {
-        crates_io(&repo.name, version, &mut findings)?;
+        for name in published_crates(gh, &format!("{owner}/{}", repo.name))? {
+            crates_io(&name, version, &mut findings)?;
+        }
     }
     if has("homebrew") {
         homebrew(gh, owner, &repo.name, version, &mut findings)?;
@@ -88,6 +90,67 @@ pub fn check(gh: &Gh, owner: &str, repo: &Repo, needs: &Needs) -> Result<Finding
         winget(gh, owner, &repo.name, version, &mut findings)?;
     }
     Ok(findings)
+}
+
+/// The crates the repo publishes: its package and workspace members, minus
+/// those with `publish = false`. Members may end in `/*`.
+fn published_crates(gh: &Gh, repo: &str) -> Result<Vec<String>> {
+    let manifest = |dir: &str| -> Result<Option<toml::Table>> {
+        let path = if dir.is_empty() {
+            "Cargo.toml".to_owned()
+        } else {
+            format!("{dir}/Cargo.toml")
+        };
+        gh.file(repo, &path, None)?
+            .map(|text| {
+                text.parse()
+                    .with_context(|| format!("parsing {repo}'s {path}"))
+            })
+            .transpose()
+    };
+    let published = |table: &toml::Table| -> Option<String> {
+        let package = table.get("package")?;
+        let publish = package.get("publish");
+        let off = publish
+            .is_some_and(|p| p.as_bool() == Some(false) || p.as_array().is_some_and(Vec::is_empty));
+        if off {
+            return None;
+        }
+        package.get("name")?.as_str().map(str::to_owned)
+    };
+
+    let Some(root) = manifest("")? else {
+        return Ok(Vec::new());
+    };
+    let mut names: Vec<String> = published(&root).into_iter().collect();
+    let members = root
+        .get("workspace")
+        .and_then(|w| w.get("members"))
+        .and_then(toml::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(toml::Value::as_str);
+    for member in members {
+        let dirs = match member.strip_suffix("/*") {
+            Some(parent) => gh
+                .get(&format!("repos/{repo}/contents/{parent}"))?
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter(|e| e["type"] == "dir")
+                .filter_map(|e| e["path"].as_str().map(str::to_owned))
+                .collect(),
+            None => vec![member.to_owned()],
+        };
+        for dir in dirs {
+            if let Some(name) = manifest(&dir)?.as_ref().and_then(published)
+                && !names.contains(&name)
+            {
+                names.push(name);
+            }
+        }
+    }
+    Ok(names)
 }
 
 fn crates_io(name: &str, version: &str, findings: &mut Findings) -> Result<()> {
@@ -107,10 +170,12 @@ fn crates_io(name: &str, version: &str, findings: &mut Findings) -> Result<()> {
     let info: Value =
         serde_json::from_slice(&out.stdout).with_context(|| format!("GET {url}: not JSON"))?;
     match info["crate"]["max_version"].as_str() {
-        None => findings.problems.push("crates.io: not published".into()),
-        Some(v) if v != version => findings
+        None => findings
             .problems
-            .push(format!("crates.io: has {v}, latest release is {version}")),
+            .push(format!("crates.io {name}: not published")),
+        Some(v) if v != version => findings.problems.push(format!(
+            "crates.io {name}: has {v}, latest release is {version}"
+        )),
         Some(_) => {}
     }
     Ok(())
