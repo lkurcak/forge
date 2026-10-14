@@ -161,6 +161,9 @@ tags = ["rust"]
 [repos.arena-game]
 tags = ["rust"]
 
+[repos.t-lang]
+tags = ["rust"]
+
 [repos.nvim]
 
 [repos.cfg]
