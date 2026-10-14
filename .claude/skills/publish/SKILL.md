@@ -27,8 +27,10 @@ input on, running `forge apply`, and cutting a release.
 
 1. **Check the repo first.** Clone or open it (`~/repos/*/REPO`). It must build on every
    target in its tags (`cargo build --target …` problems show up only in CI otherwise):
-   Windows-only or Unix-only code paths are the usual suspects. The binary must be named
-   like the repo.
+   Windows-only or Unix-only code paths are the usual suspects. The archives ship the
+   binary named like the repo, or else the workspace's only binary (t-lang ships `t`);
+   anything else fails the release's verify job. `scripts/winget-new.sh` still assumes
+   `{repo}.exe`, so fix its manifest by hand for a differently named binary.
 2. **Turn the inputs on** in the repo's `.github/workflows/release.yml`. If it doesn't
    call the shared workflow yet, replace the file with the call (copy gud's). The repo
    must be in `forge.toml` (any tags; channels don't go there). Commit it with the rest

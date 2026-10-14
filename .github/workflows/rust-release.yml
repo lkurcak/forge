@@ -38,7 +38,8 @@ on:
       binaries:
         description: >-
           Attach {repo}-vX.Y.Z-{target} archives (.tar.gz, or .zip on Windows)
-          for each of BINARIES_TARGETS to the GitHub release.
+          for each of BINARIES_TARGETS to the GitHub release. They hold the
+          binary named like the repo, or else the workspace's only binary.
         type: boolean
         default: false
       homebrew:
@@ -77,6 +78,7 @@ jobs:
       version: ${{ steps.version.outputs.version }}
       matrix: ${{ steps.matrix.outputs.matrix }}
       binaries: ${{ steps.matrix.outputs.any }}
+      bin: ${{ steps.bin.outputs.bin }}
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -95,6 +97,24 @@ jobs:
             exit 1
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
+      # The archives are named after the repo, but the executable in them
+      # keeps its own name: the binary named like the repo, or else the
+      # workspace's only binary.
+      - if: inputs.binaries || inputs.winget
+        name: Find the binary
+        id: bin
+        run: |
+          bins=$(cargo metadata --no-deps --format-version 1 \
+            | jq -r '.packages[].targets[] | select(.kind | index("bin")) | .name')
+          if grep -qxF "$REPO" <<<"$bins"; then
+            bin=$REPO
+          elif [ "$(grep -c . <<<"$bins")" -eq 1 ]; then
+            bin=$bins
+          else
+            echo "::error::No binary named $REPO, and not exactly one other to ship instead: $(tr '\n' ' ' <<<"$bins")"
+            exit 1
+          fi
+          echo "bin=$bin" >> "$GITHUB_OUTPUT"
       - name: Pick a runner per target
         id: matrix
         env:
@@ -133,6 +153,7 @@ jobs:
     env:
       TARGET: ${{ matrix.target }}
       ARCHIVE: ${{ github.event.repository.name }}-v${{ needs.verify.outputs.version }}-${{ matrix.target }}
+      BIN: ${{ needs.verify.outputs.bin }}
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -151,7 +172,7 @@ jobs:
         run: |
           case "$TARGET" in *windows*) exe=.exe ;; *) exe= ;; esac
           mkdir "$ARCHIVE"
-          cp "target/$TARGET/release/$REPO$exe" "$ARCHIVE/"
+          cp "target/$TARGET/release/$BIN$exe" "$ARCHIVE/"
           cp README* LICENSE* UNLICENSE* "$ARCHIVE/" 2>/dev/null || true
           if [ -n "$exe" ]; then
             # PowerShell is on every Windows image, ARM included; 7-Zip may not be.
