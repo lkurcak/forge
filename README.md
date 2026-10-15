@@ -42,6 +42,8 @@ forge apply [REPO…]   # fix drift
   `binaries`, `homebrew`, `winget`; `container` for CI) are where they say what they ship. forge
   reads that call: each input turned on counts as a tag, so it brings that tag's
   secrets, and calling the workflow at all brings the `rust-release` tag.
+  Homebrew can't reach a private repo, so from one `homebrew` ships the
+  `binaries` archives through a `{repo}-dist-vX.Y.Z` release on the tap.
 - The latest GitHub release is checked too: its tag must look like
   `release_tag_prefix` + `X.Y.Z`, it must have a
   `{repo}-vX.Y.Z-{target}.tar.gz` (`.zip` on Windows) for each target the
