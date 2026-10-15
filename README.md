@@ -18,7 +18,11 @@ forge apply [REPO…]   # fix drift
   name. Repos opt in with `rulesets = [...]`, or get them from a tag's.
 - `[tags.<name>]` adds Actions variables and secrets to every repo with that tag.
   Secret values come from local files (e.g. `~/.config/forge/tap-app.pem`) and are
-  only set when the secret is missing, since GitHub never reveals them.
+  only set when the secret is missing, since GitHub never reveals them. Tags
+  can carry `settings` too, applied over the top-level ones and under the repo's.
+- A tag with `needs_public = true` only works on public repos. Every public
+  repo must carry it or decline it with `no-<tag>`, and a private repo
+  carrying it is reported, so making a repo public or private shows up.
 - `[tags.<name>.environments.<env>]` makes a deployment environment exist;
   `deploy_tags = [...]` lets only those tag patterns deploy to it, and no branch.
 - A tag's `calls = [...]` names shared workflows its repos must call; one

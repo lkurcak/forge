@@ -50,6 +50,13 @@ struct RawTag {
     /// Shared workflows, by name, the repo must call.
     #[serde(default)]
     calls: Vec<String>,
+    /// Repo settings, over the top-level ones and under the repo's own.
+    #[serde(default)]
+    settings: Map<String, Value>,
+    /// Only for public repos, where GitHub offers what it sets. Every public
+    /// repo has to decide: carry the tag, or `no-{tag}` to decline it.
+    #[serde(default)]
+    needs_public: bool,
     /// Lints every package's `[lints]` must set, at least this strictly.
     #[serde(default)]
     lints: Lints,
@@ -97,7 +104,9 @@ pub struct Manifest {
 pub struct Repo {
     pub name: String,
     pub tags: Vec<String>,
-    pub settings: Map<String, Value>,
+    /// The top-level settings; tags' and then its own go over them in [`Needs`].
+    settings: Map<String, Value>,
+    own_settings: Map<String, Value>,
     pub actions: Map<String, Value>,
     pub rulesets: Vec<Ruleset>,
     /// What the latest release's tag must start with, followed by the version.
@@ -115,14 +124,21 @@ struct Tag {
     environments: BTreeMap<String, Environment>,
     rulesets: Vec<Ruleset>,
     calls: Vec<String>,
+    settings: Map<String, Value>,
+    needs_public: bool,
     lints: Lints,
 }
 
-/// What a repository needs, from its manifest tags plus the tags its
-/// `release.yml` implies.
+/// What a repository needs, from its manifest tags plus the tags its calls
+/// of shared workflows imply.
 #[derive(Default)]
 pub struct Needs {
     pub tags: Vec<String>,
+    /// Tags that need a public repo, on a private one or undecided on a
+    /// public one; the manifest has to change.
+    pub visibility_problems: Vec<String>,
+    /// Repo settings: top-level, then the tags', then the repo's own.
+    pub settings: Map<String, Value>,
     /// Actions variables and their values.
     pub variables: BTreeMap<String, String>,
     /// Actions secrets that must exist and the local files holding their values.
@@ -162,26 +178,13 @@ impl Manifest {
             if let Some(ruleset) = loaded.get(name) {
                 return Ok(ruleset.clone());
             }
-            let file = rulesets_dir.join(format!("{name}.json"));
-            let text =
-                fs::read_to_string(&file).with_context(|| format!("reading {}", file.display()))?;
-            let mut body: Value = serde_json::from_str(&text)
-                .with_context(|| format!("parsing {}", file.display()))?;
-            body.as_object_mut()
-                .with_context(|| format!("{} is not a JSON object", file.display()))?
-                .insert("name".into(), name.into());
-            let ruleset = Ruleset {
-                name: name.into(),
-                body,
-            };
+            let ruleset = Ruleset::read(&rulesets_dir, name)?;
             loaded.insert(name.to_owned(), ruleset.clone());
             Ok(ruleset)
         };
 
         let mut repos = Vec::new();
         for (name, repo) in raw.repos {
-            let mut settings = raw.settings.clone();
-            settings.extend(repo.settings);
             let mut actions = raw.actions.clone();
             actions.extend(repo.actions);
             let rulesets = repo
@@ -195,7 +198,8 @@ impl Manifest {
             repos.push(Repo {
                 name,
                 tags: repo.tags,
-                settings,
+                settings: raw.settings.clone(),
+                own_settings: repo.settings,
                 actions,
                 rulesets,
                 release_tag_prefix: if repo.releases {
@@ -231,6 +235,8 @@ impl Manifest {
                     forbidden_secrets: tag.forbidden_secrets,
                     environments: tag.environments,
                     calls: tag.calls,
+                    settings: tag.settings,
+                    needs_public: tag.needs_public,
                     lints: tag.lints,
                 };
                 Ok((name, tag))
@@ -260,9 +266,11 @@ impl Manifest {
 
     /// Merges the requirements of the repo's tags. A repo calling a shared
     /// workflow also gets a tag named after it, and one per input it turns on.
-    /// `calls` pairs with [`Self::workflows`].
-    pub fn needs(&self, repo: &Repo, calls: &[Option<Call>]) -> Needs {
+    /// `calls` pairs with [`Self::workflows`]. Tags needing a public repo are
+    /// dropped on private ones.
+    pub fn needs(&self, repo: &Repo, calls: &[Option<Call>], public: bool) -> Needs {
         let mut needs = Needs {
+            settings: repo.settings.clone(),
             rulesets: repo.rulesets.clone(),
             ..Needs::default()
         };
@@ -283,11 +291,26 @@ impl Manifest {
             }
         }
 
+        for (name, _) in self.tags.iter().filter(|(_, t)| t.needs_public) {
+            let tagged = needs.tags.contains(name);
+            if tagged && !public {
+                needs.visibility_problems.push(format!(
+                    "tag {name}: only works on public repos, and this one is private"
+                ));
+                needs.tags.retain(|t| t != name);
+            } else if !tagged && public && !needs.tags.contains(&format!("no-{name}")) {
+                needs.visibility_problems.push(format!(
+                    "public, so it can have {name}: add the {name} tag, or no-{name} to hide this"
+                ));
+            }
+        }
+
         for tag in needs.tags.clone().iter().filter_map(|t| self.tags.get(t)) {
             needs.variables.extend(tag.variables.clone());
             needs.secrets.extend(tag.secrets.clone());
             push_new(&mut needs.forbidden_secrets, &tag.forbidden_secrets);
             push_new(&mut needs.calls, &tag.calls);
+            needs.settings.extend(tag.settings.clone());
             for (name, environment) in &tag.environments {
                 let needed = needs.environments.entry(name.clone()).or_default();
                 push_new(&mut needed.deploy_tags, &environment.deploy_tags);
@@ -305,6 +328,7 @@ impl Manifest {
                     .extend(lints.clone());
             }
         }
+        needs.settings.extend(repo.own_settings.clone());
 
         if repo.release_tag_prefix.is_some() {
             push_new(&mut needs.release_targets, &repo.release_targets);
@@ -315,6 +339,24 @@ impl Manifest {
             }
         }
         needs
+    }
+}
+
+impl Ruleset {
+    /// Reads `{name}.json` from `dir`, naming the ruleset after the file.
+    fn read(dir: &Path, name: &str) -> Result<Self> {
+        let file = dir.join(format!("{name}.json"));
+        let text =
+            fs::read_to_string(&file).with_context(|| format!("reading {}", file.display()))?;
+        let mut body: Value =
+            serde_json::from_str(&text).with_context(|| format!("parsing {}", file.display()))?;
+        body.as_object_mut()
+            .with_context(|| format!("{} is not a JSON object", file.display()))?
+            .insert("name".into(), name.into());
+        Ok(Self {
+            name: name.into(),
+            body,
+        })
     }
 }
 

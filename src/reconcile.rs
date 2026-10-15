@@ -60,15 +60,28 @@ pub fn reconcile(gh: &Gh, manifest: &Manifest, repo: &Repo, mode: Mode) -> Outco
         }
         calls.push(call);
     }
-    let needs = manifest.needs(repo, &calls);
+    // Everything below needs to know whether the repo is public.
+    let actual = match gh.get(&base) {
+        Ok(actual) => actual,
+        Err(err) => {
+            outcome.errors.push(format!("{err:#}"));
+            return outcome;
+        }
+    };
+    let public = actual["private"] == false;
+
+    let needs = manifest.needs(repo, &calls, public);
+    outcome
+        .manual
+        .extend(needs.visibility_problems.iter().cloned());
     for (workflow, call) in manifest.workflows.iter().zip(&calls) {
         if call.is_none() && needs.calls.contains(&workflow.name) {
             outcome.manual.push(workflow.missing());
         }
     }
 
-    if !repo.settings.is_empty() {
-        let result = settings_drift(gh, mode, &base, repo, &mut outcome.skipped);
+    if !needs.settings.is_empty() {
+        let result = settings_drift(gh, mode, &base, &needs.settings, &actual);
         outcome.record(result);
     }
 
@@ -158,48 +171,39 @@ fn settings_drift(
     gh: &Gh,
     mode: Mode,
     base: &str,
-    repo: &Repo,
-    skipped: &mut Vec<String>,
+    settings: &Map<String, Value>,
+    actual: &Value,
 ) -> Result<Vec<String>> {
-    let actual = gh.get(base)?;
-    let mut settings = repo.settings.clone();
+    let mut settings = settings.clone();
     let security = settings.remove("security_and_analysis");
-    let mut drift = object_drift(gh, mode, "settings", &settings, &actual, "PATCH", base)?;
-    match security {
-        // Only public repos get it for free; private ones show it as null.
-        Some(_) if actual["security_and_analysis"].is_null() => {
-            skipped
-                .push("security_and_analysis (private repos need GitHub Advanced Security)".into());
-        }
-        Some(mut security) => {
-            // Ignored in the PATCH too, though its own endpoint works.
-            let updates = security
-                .as_object_mut()
-                .and_then(|s| s.remove("dependabot_security_updates"));
-            if let Some(updates) = updates {
-                let expected = Map::from_iter([(
-                    "security_and_analysis".into(),
-                    json!({ "dependabot_security_updates": updates }),
-                )]);
-                let found = object_drift(gh, Mode::Check, "settings", &expected, &actual, "", "")?;
-                if mode.applies() && !found.is_empty() {
-                    let fixes = format!("{base}/automated-security-fixes");
-                    if updates["status"] == "enabled" {
-                        // They act on Dependabot alerts, which must be on first.
-                        gh.api("PUT", &format!("{base}/vulnerability-alerts"), None)?;
-                        gh.api("PUT", &fixes, None)?;
-                    } else {
-                        gh.api("DELETE", &fixes, None)?;
-                    }
+    let mut drift = object_drift(gh, mode, "settings", &settings, actual, "PATCH", base)?;
+    if let Some(mut security) = security {
+        // Ignored in the PATCH too, though its own endpoint works.
+        let updates = security
+            .as_object_mut()
+            .and_then(|s| s.remove("dependabot_security_updates"));
+        if let Some(updates) = updates {
+            let expected = Map::from_iter([(
+                "security_and_analysis".into(),
+                json!({ "dependabot_security_updates": updates }),
+            )]);
+            let found = object_drift(gh, Mode::Check, "settings", &expected, actual, "", "")?;
+            if mode.applies() && !found.is_empty() {
+                let fixes = format!("{base}/automated-security-fixes");
+                if updates["status"] == "enabled" {
+                    // They act on Dependabot alerts, which must be on first.
+                    gh.api("PUT", &format!("{base}/vulnerability-alerts"), None)?;
+                    gh.api("PUT", &fixes, None)?;
+                } else {
+                    gh.api("DELETE", &fixes, None)?;
                 }
-                drift.extend(found);
             }
-            let security = Map::from_iter([("security_and_analysis".into(), security)]);
-            drift.extend(object_drift(
-                gh, mode, "settings", &security, &actual, "PATCH", base,
-            )?);
+            drift.extend(found);
         }
-        None => {}
+        let security = Map::from_iter([("security_and_analysis".into(), security)]);
+        drift.extend(object_drift(
+            gh, mode, "settings", &security, actual, "PATCH", base,
+        )?);
     }
     Ok(drift)
 }

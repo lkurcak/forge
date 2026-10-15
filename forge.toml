@@ -63,13 +63,6 @@ allow_update_branch = true
 # Nothing has required checks for auto-merge to wait on.
 allow_auto_merge = false
 
-# Secret scanning, and rejecting pushes that contain a secret it recognizes.
-# Dependabot opens PRs only for dependencies with known vulnerabilities, not
-# for every new version. Settable on public repos only, so private ones skip it.
-[settings.security_and_analysis]
-secret_scanning = { status = "enabled" }
-secret_scanning_push_protection = { status = "enabled" }
-dependabot_security_updates = { status = "enabled" }
 
 # PUT /repos/{owner}/{repo}/actions/permissions/workflow
 [actions]
@@ -94,6 +87,19 @@ mod_module_files = "warn"
 # always points at the commit it was built from.
 [tags.rust-release]
 rulesets = ["protect-release-tags"]
+
+# Secret scanning, and rejecting pushes that contain a secret it recognizes.
+# Dependabot opens PRs only for dependencies with known vulnerabilities, not
+# for every new version. Only free on public repos, so forge asks each public
+# repo to take the tag or decline it with no-security, and flags a private one
+# that has it.
+[tags.security]
+needs_public = true
+
+[tags.security.settings.security_and_analysis]
+secret_scanning = { status = "enabled" }
+secret_scanning_push_protection = { status = "enabled" }
+dependabot_security_updates = { status = "enabled" }
 
 # Its crates.io and Homebrew jobs run in this environment, and crates.io's
 # trusted publisher is configured for it (workflow release.yml, environment
@@ -123,11 +129,11 @@ secrets = { WINGET_PAT = "~/.config/forge/winget-pat" }
 # Published
 
 [repos.gud]
-tags = ["rust"]
+tags = ["rust", "security"]
 rulesets = ["protect-default-branch"]
 
 [repos.tend]
-tags = ["rust"]
+tags = ["rust", "security"]
 rulesets = ["require-pr"]
 
 # Its source repo is private, so the archives are published on homebrew-tap's
@@ -138,7 +144,7 @@ tags = ["rust", "homebrew"]
 # Not on the shared workflow, so its archives are listed here. OCaml builds
 # Windows binaries with MinGW.
 [repos.ocalc]
-tags = ["ocaml", "homebrew"]
+tags = ["ocaml", "homebrew", "security"]
 rulesets = ["protect-release-tags"]
 release_targets = [
   "aarch64-apple-darwin",
@@ -148,16 +154,16 @@ release_targets = [
 ]
 
 [repos.folktime]
-tags = ["rust"]
+tags = ["rust", "security"]
 
 [repos.split-paragraphs]
-tags = ["rust"]
+tags = ["rust", "security"]
 
 [repos.auburn]
-tags = ["rust"]
+tags = ["rust", "security"]
 
 [repos.math]
-tags = ["rust"]
+tags = ["rust", "security"]
 
 [repos.acct]
 tags = ["rust", "ghcr"]
@@ -169,10 +175,11 @@ tags = ["rust", "ghcr"]
 
 # Its releases hold bottles and binaries for other repos.
 [repos.homebrew-tap]
+tags = ["security"]
 releases = false
 
 [repos.forge]
-tags = ["rust"]
+tags = ["rust", "security"]
 
 # Active
 
@@ -186,14 +193,16 @@ tags = ["rust"]
 tags = ["rust"]
 
 [repos.magicube-solver]
-tags = ["rust"]
+tags = ["rust", "security"]
 
 [repos.arena-game]
 tags = ["rust"]
 
 [repos.t-lang]
-tags = ["rust"]
+tags = ["rust", "security"]
 
 [repos.nvim]
+tags = ["security"]
 
 [repos.cfg]
+tags = ["security"]
