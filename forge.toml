@@ -63,6 +63,14 @@ allow_update_branch = true
 # Nothing has required checks for auto-merge to wait on.
 allow_auto_merge = false
 
+# Secret scanning, and rejecting pushes that contain a secret it recognizes.
+# Dependabot opens PRs only for dependencies with known vulnerabilities, not
+# for every new version. Settable on public repos only, so private ones skip it.
+[settings.security_and_analysis]
+secret_scanning = { status = "enabled" }
+secret_scanning_push_protection = { status = "enabled" }
+dependabot_security_updates = { status = "enabled" }
+
 # PUT /repos/{owner}/{repo}/actions/permissions/workflow
 [actions]
 default_workflow_permissions = "read"
@@ -73,6 +81,11 @@ can_approve_pull_request_reviews = false
 # [workspace.lints] with `lints.workspace = true`, at this level or stricter.
 # CI runs clippy with -D warnings, so warn is enough to fail it. forge only
 # reports these; the fix is a commit to the repo.
+# Rust repos run the shared CI. forge only reports a repo that doesn't call
+# it; the fix is a commit to the repo.
+[tags.rust]
+calls = ["rust-ci"]
+
 [tags.rust.lints.clippy]
 # Modules as foo.rs next to foo/, never foo/mod.rs.
 mod_module_files = "warn"

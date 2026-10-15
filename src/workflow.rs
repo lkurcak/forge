@@ -141,6 +141,14 @@ impl SharedWorkflow {
         }))
     }
 
+    /// What to tell a repo that should call this workflow but doesn't.
+    pub fn missing(&self) -> String {
+        format!(
+            "{}: should call {}@{}",
+            self.caller, self.path, self.git_ref
+        )
+    }
+
     /// What's wrong with a repo's call; the repo has to fix these itself.
     pub fn problems(&self, call: &Call) -> Vec<String> {
         let mut problems = Vec::new();

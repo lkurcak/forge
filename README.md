@@ -21,6 +21,8 @@ forge apply [REPO…]   # fix drift
   only set when the secret is missing, since GitHub never reveals them.
 - `[tags.<name>.environments.<env>]` makes a deployment environment exist;
   `deploy_tags = [...]` lets only those tag patterns deploy to it, and no branch.
+- A tag's `calls = [...]` names shared workflows its repos must call; one
+  that doesn't is reported.
 - `[tags.<name>.lints]` lists lints each Cargo package must set (or inherit
   from `[workspace.lints]`), in Cargo's `[lints]` shape. Missing ones are only
   reported, since fixing them means committing to the repo.

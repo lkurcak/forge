@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 use serde_json::{Map, Value};
 
@@ -47,6 +47,9 @@ struct RawTag {
     /// Rulesets from rulesets/, added to the repo's own.
     #[serde(default)]
     rulesets: Vec<String>,
+    /// Shared workflows, by name, the repo must call.
+    #[serde(default)]
+    calls: Vec<String>,
     /// Lints every package's `[lints]` must set, at least this strictly.
     #[serde(default)]
     lints: Lints,
@@ -111,6 +114,7 @@ struct Tag {
     forbidden_secrets: Vec<String>,
     environments: BTreeMap<String, Environment>,
     rulesets: Vec<Ruleset>,
+    calls: Vec<String>,
     lints: Lints,
 }
 
@@ -129,6 +133,8 @@ pub struct Needs {
     pub environments: BTreeMap<String, Environment>,
     /// The repo's rulesets plus its tags'.
     pub rulesets: Vec<Ruleset>,
+    /// Shared workflows, by name, the repo must call.
+    pub calls: Vec<String>,
     /// Targets the latest release must have a binary archive for.
     pub release_targets: Vec<String>,
     /// Lints every package's `[lints]` must set, at least this strictly.
@@ -206,7 +212,7 @@ impl Manifest {
             });
         }
 
-        let tags = raw
+        let tags: BTreeMap<String, Tag> = raw
             .tags
             .into_iter()
             .map(|(name, tag)| {
@@ -224,20 +230,30 @@ impl Manifest {
                         .collect(),
                     forbidden_secrets: tag.forbidden_secrets,
                     environments: tag.environments,
+                    calls: tag.calls,
                     lints: tag.lints,
                 };
                 Ok((name, tag))
             })
             .collect::<Result<_>>()?;
 
+        let workflows: Vec<SharedWorkflow> = raw
+            .workflows
+            .iter()
+            .map(|(caller, uses)| SharedWorkflow::load(dir, caller, uses))
+            .collect::<Result<_>>()?;
+        for (name, tag) in &tags {
+            for call in &tag.calls {
+                if !workflows.iter().any(|w| &w.name == call) {
+                    bail!("tag {name} calls {call}, which isn't in [workflows]");
+                }
+            }
+        }
+
         Ok(Self {
             owner: raw.owner,
             repos,
-            workflows: raw
-                .workflows
-                .iter()
-                .map(|(caller, uses)| SharedWorkflow::load(dir, caller, uses))
-                .collect::<Result<_>>()?,
+            workflows,
             tags,
         })
     }
@@ -271,6 +287,7 @@ impl Manifest {
             needs.variables.extend(tag.variables.clone());
             needs.secrets.extend(tag.secrets.clone());
             push_new(&mut needs.forbidden_secrets, &tag.forbidden_secrets);
+            push_new(&mut needs.calls, &tag.calls);
             for (name, environment) in &tag.environments {
                 let needed = needs.environments.entry(name.clone()).or_default();
                 push_new(&mut needed.deploy_tags, &environment.deploy_tags);
