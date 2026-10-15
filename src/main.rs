@@ -2,10 +2,12 @@ mod cargo;
 mod diff;
 mod gh;
 mod manifest;
+mod progress;
 mod reconcile;
 mod release;
 mod workflow;
 
+use std::fmt::Write as _;
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::Mutex;
@@ -17,7 +19,8 @@ use clap::{Parser, Subcommand};
 
 use crate::gh::Gh;
 use crate::manifest::{Manifest, Repo};
-use crate::reconcile::{Mode, reconcile};
+use crate::progress::Progress;
+use crate::reconcile::{Mode, Outcome, reconcile};
 
 #[derive(Parser)]
 #[command(version, about)]
@@ -80,41 +83,24 @@ const WORKERS: usize = 8;
 
 fn sync(gh: &Gh, manifest: &Manifest, names: &[String], mode: Mode) -> Result<ExitCode> {
     let repos = select(manifest, names)?;
-    let outcomes = in_parallel(&repos, |repo| reconcile(gh, manifest, repo, mode));
+    let progress = Progress::new(&repos.iter().map(|r| r.name.as_str()).collect::<Vec<_>>());
     let mut failed = false;
 
-    for (repo, outcome) in repos.iter().zip(outcomes) {
-        let mark = if !outcome.errors.is_empty() {
-            "!"
-        } else if !outcome.manual.is_empty() {
-            "✗"
-        } else if outcome.drift.is_empty() {
-            "✓"
-        } else if mode == Mode::Check {
-            "✗"
-        } else {
-            "↻"
-        };
-        println!("{mark} {}", repo.name);
-        for line in &outcome.drift {
-            println!("    {line}");
-        }
-        for line in &outcome.manual {
-            println!("    {line} (fix by hand)");
-        }
-        for line in &outcome.pending {
-            println!("    pending: {line}");
-        }
-        for line in &outcome.skipped {
-            println!("    skipped {line}");
-        }
-        for line in &outcome.errors {
-            println!("    error: {line}");
-        }
-        failed |= !outcome.errors.is_empty()
-            || !outcome.manual.is_empty()
-            || (mode == Mode::Check && !outcome.drift.is_empty());
-    }
+    in_parallel(
+        &repos,
+        |i, repo| {
+            progress.start(i);
+            let outcome = reconcile(gh, manifest, repo, mode);
+            progress.finish(i, mark(&outcome, mode));
+            outcome
+        },
+        |i, outcome| {
+            progress.report(i, &report(&repos[i].name, &outcome, mode));
+            failed |= !outcome.errors.is_empty()
+                || !outcome.manual.is_empty()
+                || (mode == Mode::Check && !outcome.drift.is_empty());
+        },
+    );
 
     Ok(if failed {
         ExitCode::FAILURE
@@ -123,28 +109,80 @@ fn sync(gh: &Gh, manifest: &Manifest, names: &[String], mode: Mode) -> Result<Ex
     })
 }
 
-/// Maps `items` through `f` on a few threads, keeping the results in order.
-fn in_parallel<T: Sync, R: Send>(items: &[T], f: impl Fn(&T) -> R + Sync) -> Vec<R> {
+fn mark(outcome: &Outcome, mode: Mode) -> &'static str {
+    if !outcome.errors.is_empty() {
+        "!"
+    } else if !outcome.manual.is_empty() {
+        "✗"
+    } else if outcome.drift.is_empty() {
+        "✓"
+    } else if mode == Mode::Check {
+        "✗"
+    } else {
+        "↻"
+    }
+}
+
+/// A repo's mark and name, then a line per finding.
+fn report(name: &str, outcome: &Outcome, mode: Mode) -> String {
+    let mut text = format!("{} {name}", mark(outcome, mode));
+    let sections = [
+        ("", "", &outcome.drift),
+        ("", " (fix by hand)", &outcome.manual),
+        ("pending: ", "", &outcome.pending),
+        ("skipped ", "", &outcome.skipped),
+        ("error: ", "", &outcome.errors),
+    ];
+    for (prefix, suffix, lines) in sections {
+        for line in lines {
+            write!(text, "\n    {prefix}{line}{suffix}").expect("writing to a String");
+        }
+    }
+    text
+}
+
+/// Maps `items` through `f` on a few threads, handing each result to `emit`
+/// as soon as it and every result before it are in, so output keeps the
+/// items' order without waiting for all of them. `f` and `emit` get the
+/// item's index too.
+fn in_parallel<T: Sync, R: Send>(
+    items: &[T],
+    f: impl Fn(usize, &T) -> R + Sync,
+    emit: impl FnMut(usize, R) + Send,
+) {
+    struct Done<R, E> {
+        results: Vec<Option<R>>,
+        emitted: usize,
+        emit: E,
+    }
     let next = AtomicUsize::new(0);
-    let results: Mutex<Vec<Option<R>>> = Mutex::new(items.iter().map(|_| None).collect());
+    let done = Mutex::new(Done {
+        results: items.iter().map(|_| None).collect(),
+        emitted: 0,
+        emit,
+    });
     thread::scope(|scope| {
         for _ in 0..WORKERS.min(items.len()) {
             scope.spawn(|| {
                 loop {
                     let i = next.fetch_add(1, Ordering::Relaxed);
                     let Some(item) = items.get(i) else { break };
-                    let result = f(item);
-                    results.lock().expect("worker panicked")[i] = Some(result);
+                    let result = f(i, item);
+                    let mut guard = done.lock().expect("worker panicked");
+                    let done = &mut *guard;
+                    done.results[i] = Some(result);
+                    while let Some(result) =
+                        done.results.get_mut(done.emitted).and_then(Option::take)
+                    {
+                        let at = done.emitted;
+                        (done.emit)(at, result);
+                        done.emitted += 1;
+                    }
+                    drop(guard);
                 }
             });
         }
     });
-    results
-        .into_inner()
-        .expect("worker panicked")
-        .into_iter()
-        .map(|r| r.expect("every item is processed"))
-        .collect()
 }
 
 fn select<'a>(manifest: &'a Manifest, names: &[String]) -> Result<Vec<&'a Repo>> {
@@ -163,11 +201,11 @@ fn select<'a>(manifest: &'a Manifest, names: &[String]) -> Result<Vec<&'a Repo>>
 }
 
 fn list(gh: &Gh, manifest: &Manifest) -> Result<ExitCode> {
-    let calls = in_parallel(&manifest.repos, |repo| {
+    let calls = |repo: &Repo| {
         manifest
             .workflows
             .iter()
-            .map(
+            .filter_map(
                 |workflow| match workflow.call(gh, &manifest.owner, &repo.name) {
                     Ok(Some(call)) => Some(format!("{}: {}", workflow.name, call.describe())),
                     Ok(None) => None,
@@ -175,17 +213,21 @@ fn list(gh: &Gh, manifest: &Manifest) -> Result<ExitCode> {
                 },
             )
             .collect::<Vec<_>>()
-    });
-    for (repo, calls) in manifest.repos.iter().zip(calls) {
-        let tags: Vec<_> = repo.tags.iter().map(|t| format!("#{t}")).collect();
-        let calls: Vec<_> = calls.into_iter().flatten().collect();
-        println!(
-            "{:<20} {:<16} {}",
-            repo.name,
-            tags.join(" "),
-            calls.join(" | ")
-        );
-    }
+    };
+    in_parallel(
+        &manifest.repos,
+        |_, repo| calls(repo),
+        |i, calls| {
+            let repo = &manifest.repos[i];
+            let tags: Vec<_> = repo.tags.iter().map(|t| format!("#{t}")).collect();
+            println!(
+                "{:<20} {:<16} {}",
+                repo.name,
+                tags.join(" "),
+                calls.join(" | ")
+            );
+        },
+    );
 
     let unmanaged: Vec<_> = gh
         .source_repos(&manifest.owner)?
