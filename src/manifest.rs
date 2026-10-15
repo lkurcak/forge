@@ -107,7 +107,7 @@ pub struct Repo {
     /// The top-level settings; tags' and then its own go over them in [`Needs`].
     settings: Map<String, Value>,
     own_settings: Map<String, Value>,
-    pub actions: Map<String, Value>,
+    pub actions: Actions,
     pub rulesets: Vec<Ruleset>,
     /// What the latest release's tag must start with, followed by the version.
     /// `None` for repos without versioned releases.
@@ -115,6 +115,20 @@ pub struct Repo {
     /// Targets the latest release must have a binary archive for, besides the
     /// ones its release workflow builds; `*` matches anything.
     pub release_targets: Vec<String>,
+}
+
+/// `[actions]`, one map per endpoint under
+/// `/repos/{owner}/{repo}/actions/permissions`, with the repo's own keys over
+/// the top-level ones.
+#[derive(Default)]
+pub struct Actions {
+    /// The endpoint itself: whether Actions run, and which actions may.
+    pub permissions: Map<String, Value>,
+    /// `[actions.workflow]`: what workflows' `GITHUB_TOKEN` may do.
+    pub workflow: Map<String, Value>,
+    /// `[actions.selected-actions]`: the allowlist, used while
+    /// `allowed_actions` is `selected`.
+    pub allowlist: Map<String, Value>,
 }
 
 struct Tag {
@@ -185,8 +199,8 @@ impl Manifest {
 
         let mut repos = Vec::new();
         for (name, repo) in raw.repos {
-            let mut actions = raw.actions.clone();
-            actions.extend(repo.actions);
+            let actions = Actions::merge(raw.actions.clone(), repo.actions)
+                .with_context(|| format!("repos.{name}.actions"))?;
             let rulesets = repo
                 .rulesets
                 .as_ref()
@@ -329,6 +343,10 @@ impl Manifest {
             }
         }
         needs.settings.extend(repo.own_settings.clone());
+        // `no-{workflow}` declines a call a tag would otherwise require.
+        needs
+            .calls
+            .retain(|call| !needs.tags.contains(&format!("no-{call}")));
 
         if repo.release_tag_prefix.is_some() {
             push_new(&mut needs.release_targets, &repo.release_targets);
@@ -339,6 +357,32 @@ impl Manifest {
             }
         }
         needs
+    }
+}
+
+impl Actions {
+    fn merge(top: Map<String, Value>, own: Map<String, Value>) -> Result<Self> {
+        let mut actions = Self::split(top)?;
+        let own = Self::split(own)?;
+        actions.permissions.extend(own.permissions);
+        actions.workflow.extend(own.workflow);
+        actions.allowlist.extend(own.allowlist);
+        Ok(actions)
+    }
+
+    fn split(mut permissions: Map<String, Value>) -> Result<Self> {
+        let mut table = |key: &str| match permissions.remove(key) {
+            None => Ok(Map::new()),
+            Some(Value::Object(table)) => Ok(table),
+            Some(_) => bail!("actions.{key} must be a table"),
+        };
+        let workflow = table("workflow")?;
+        let allowlist = table("selected-actions")?;
+        Ok(Self {
+            permissions,
+            workflow,
+            allowlist,
+        })
     }
 }
 
@@ -377,4 +421,41 @@ fn expand_home(path: &str) -> PathBuf {
 
 const fn yes() -> bool {
     true
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+
+    fn map(value: Value) -> Map<String, Value> {
+        match value {
+            Value::Object(map) => map,
+            _ => panic!("not an object"),
+        }
+    }
+
+    #[test]
+    fn splits_actions_by_endpoint() {
+        let top = map(json!({
+            "allowed_actions": "selected",
+            "workflow": { "default_workflow_permissions": "read" },
+            "selected-actions": { "patterns_allowed": ["a/*"] },
+        }));
+        let own = map(json!({ "workflow": { "can_approve_pull_request_reviews": true } }));
+        let actions = Actions::merge(top, own).unwrap();
+        assert_eq!(
+            actions.permissions,
+            map(json!({ "allowed_actions": "selected" }))
+        );
+        assert_eq!(
+            actions.workflow,
+            map(json!({
+                "default_workflow_permissions": "read",
+                "can_approve_pull_request_reviews": true,
+            }))
+        );
+        assert_eq!(actions.allowlist["patterns_allowed"], json!(["a/*"]));
+    }
 }

@@ -13,6 +13,10 @@ forge apply [REPO…]   # fix drift
 
 - `forge.toml` lists the managed repos. Top-level `settings`, `actions` and
   `rulesets` apply to all of them; a repo's own table overrides them.
+- `[actions]` goes to `/actions/permissions` (whether Actions run and which
+  actions may), `[actions.workflow]` to `/actions/permissions/workflow` (the
+  `GITHUB_TOKEN`'s defaults), and `[actions.selected-actions]` to the
+  allowlist, checked while `allowed_actions` is `selected`.
 - `rulesets/*.json` are ruleset bodies in the
   [REST API shape](https://docs.github.com/en/rest/repos/rules), matched by file
   name. Repos opt in with `rulesets = [...]`, or get them from a tag's.
@@ -26,7 +30,7 @@ forge apply [REPO…]   # fix drift
 - `[tags.<name>.environments.<env>]` makes a deployment environment exist;
   `deploy_tags = [...]` lets only those tag patterns deploy to it, and no branch.
 - A tag's `calls = [...]` names shared workflows its repos must call; one
-  that doesn't is reported.
+  that doesn't is reported, unless it carries `no-<workflow>` to decline it.
 - `[tags.<name>.lints]` lists lints each Cargo package must set (or inherit
   from `[workspace.lints]`), in Cargo's `[lints]` shape. Missing ones are only
   reported, since fixing them means committing to the repo.
@@ -35,7 +39,7 @@ forge apply [REPO…]   # fix drift
   [`rust-release.yml`](.github/workflows/rust-release.yml), calling them from
   their own `.github/workflows/ci.yml` and `release.yml` (`[workflows]` in the
   manifest). The inputs they pass (`crates-io`,
-  `binaries`, `homebrew`, `winget`) are where they say what they ship. forge
+  `binaries`, `homebrew`, `winget`; `container` for CI) are where they say what they ship. forge
   reads that call: each input turned on counts as a tag, so it brings that tag's
   secrets, and calling the workflow at all brings the `rust-release` tag.
 - The latest GitHub release is checked too: its tag must look like
