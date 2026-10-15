@@ -41,12 +41,25 @@ struct RawTag {
     secrets: BTreeMap<String, String>,
     #[serde(default)]
     forbidden_secrets: Vec<String>,
-    /// Deployment environments that must exist.
+    /// Deployment environments that must exist, by name.
     #[serde(default)]
-    environments: Vec<String>,
+    environments: BTreeMap<String, Environment>,
+    /// Rulesets from rulesets/, added to the repo's own.
+    #[serde(default)]
+    rulesets: Vec<String>,
     /// Lints every package's `[lints]` must set, at least this strictly.
     #[serde(default)]
     lints: Lints,
+}
+
+/// A deployment environment a tag needs.
+#[derive(Deserialize, Clone, Default)]
+#[serde(deny_unknown_fields)]
+pub struct Environment {
+    /// Tag patterns that alone may deploy to it. Empty leaves its deployment
+    /// policy alone.
+    #[serde(default)]
+    pub deploy_tags: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -96,7 +109,8 @@ struct Tag {
     variables: BTreeMap<String, String>,
     secrets: BTreeMap<String, PathBuf>,
     forbidden_secrets: Vec<String>,
-    environments: Vec<String>,
+    environments: BTreeMap<String, Environment>,
+    rulesets: Vec<Ruleset>,
     lints: Lints,
 }
 
@@ -112,7 +126,9 @@ pub struct Needs {
     /// Actions secrets that must not exist.
     pub forbidden_secrets: Vec<String>,
     /// Deployment environments that must exist.
-    pub environments: Vec<String>,
+    pub environments: BTreeMap<String, Environment>,
+    /// The repo's rulesets plus its tags'.
+    pub rulesets: Vec<Ruleset>,
     /// Targets the latest release must have a binary archive for.
     pub release_targets: Vec<String>,
     /// Lints every package's `[lints]` must set, at least this strictly.
@@ -195,6 +211,11 @@ impl Manifest {
             .into_iter()
             .map(|(name, tag)| {
                 let tag = Tag {
+                    rulesets: tag
+                        .rulesets
+                        .iter()
+                        .map(|r| load_ruleset(r))
+                        .collect::<Result<_>>()?,
                     variables: tag.variables,
                     secrets: tag
                         .secrets
@@ -205,9 +226,9 @@ impl Manifest {
                     environments: tag.environments,
                     lints: tag.lints,
                 };
-                (name, tag)
+                Ok((name, tag))
             })
-            .collect();
+            .collect::<Result<_>>()?;
 
         Ok(Self {
             owner: raw.owner,
@@ -225,7 +246,10 @@ impl Manifest {
     /// workflow also gets a tag named after it, and one per input it turns on.
     /// `calls` pairs with [`Self::workflows`].
     pub fn needs(&self, repo: &Repo, calls: &[Option<Call>]) -> Needs {
-        let mut needs = Needs::default();
+        let mut needs = Needs {
+            rulesets: repo.rulesets.clone(),
+            ..Needs::default()
+        };
         let add_tag = |needs: &mut Needs, tag: &str| {
             if !needs.tags.iter().any(|t| t == tag) {
                 needs.tags.push(tag.to_owned());
@@ -247,7 +271,15 @@ impl Manifest {
             needs.variables.extend(tag.variables.clone());
             needs.secrets.extend(tag.secrets.clone());
             push_new(&mut needs.forbidden_secrets, &tag.forbidden_secrets);
-            push_new(&mut needs.environments, &tag.environments);
+            for (name, environment) in &tag.environments {
+                let needed = needs.environments.entry(name.clone()).or_default();
+                push_new(&mut needed.deploy_tags, &environment.deploy_tags);
+            }
+            for ruleset in &tag.rulesets {
+                if !needs.rulesets.iter().any(|r| r.name == ruleset.name) {
+                    needs.rulesets.push(ruleset.clone());
+                }
+            }
             for (group, lints) in &tag.lints {
                 needs
                     .lints

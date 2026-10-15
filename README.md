@@ -15,10 +15,12 @@ forge apply [REPO…]   # fix drift
   `rulesets` apply to all of them; a repo's own table overrides them.
 - `rulesets/*.json` are ruleset bodies in the
   [REST API shape](https://docs.github.com/en/rest/repos/rules), matched by file
-  name. Repos opt in with `rulesets = [...]`.
+  name. Repos opt in with `rulesets = [...]`, or get them from a tag's.
 - `[tags.<name>]` adds Actions variables and secrets to every repo with that tag.
   Secret values come from local files (e.g. `~/.config/forge/tap-app.pem`) and are
   only set when the secret is missing, since GitHub never reveals them.
+- `[tags.<name>.environments.<env>]` makes a deployment environment exist;
+  `deploy_tags = [...]` lets only those tag patterns deploy to it, and no branch.
 - `[tags.<name>.lints]` lists lints each Cargo package must set (or inherit
   from `[workspace.lints]`), in Cargo's `[lints]` shape. Missing ones are only
   reported, since fixing them means committing to the repo.

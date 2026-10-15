@@ -46,6 +46,8 @@ release_tag_prefix = "v"
 # without the .json extension.
 #   protect-default-branch  no deleting or force-pushing the default branch
 #   require-pr              changes to the default branch must go through a PR
+#   protect-release-tags    no deleting or moving v* tags
+# Tags can add rulesets too, with `rulesets = [...]` in their table.
 # Private repos are skipped: rulesets there need GitHub Pro.
 
 # PATCH /repos/{owner}/{repo}
@@ -75,11 +77,17 @@ can_approve_pull_request_reviews = false
 # Modules as foo.rs next to foo/, never foo/mod.rs.
 mod_module_files = "warn"
 
+# Release tags can't be moved or deleted once pushed, so a published version
+# always points at the commit it was built from.
+[tags.rust-release]
+rulesets = ["protect-release-tags"]
+
 # Its crates.io and Homebrew jobs run in this environment, and crates.io's
 # trusted publisher is configured for it (workflow release.yml, environment
 # release). forge can't see the crates.io side; set it in the crate's settings.
-[tags.rust-release]
-environments = ["release"]
+# Only release tags may deploy to it, so no branch can publish.
+[tags.rust-release.environments.release]
+deploy_tags = ["v*"]
 
 # Formula bumps go through the tap GitHub App, never personal access tokens.
 # The App only needs to be installed on homebrew-tap.
@@ -118,6 +126,7 @@ tags = ["rust", "homebrew"]
 # Windows binaries with MinGW.
 [repos.ocalc]
 tags = ["ocaml", "homebrew"]
+rulesets = ["protect-release-tags"]
 release_targets = [
   "aarch64-apple-darwin",
   "aarch64-unknown-linux-gnu",

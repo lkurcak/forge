@@ -1,7 +1,7 @@
 use std::fs;
 
 use anyhow::{Context, Result};
-use serde_json::{Map, Value};
+use serde_json::{Map, Value, json};
 
 use crate::cargo::Workspace;
 use crate::diff::subset;
@@ -85,7 +85,7 @@ pub fn reconcile(gh: &Gh, manifest: &Manifest, repo: &Repo, mode: Mode) -> Outco
         outcome.record(result);
     }
 
-    if !repo.rulesets.is_empty() {
+    if !needs.rulesets.is_empty() {
         match gh.get(&format!(
             "{base}/rulesets?includes_parents=false&per_page=100"
         )) {
@@ -97,7 +97,7 @@ pub fn reconcile(gh: &Gh, manifest: &Manifest, repo: &Repo, mode: Mode) -> Outco
             }
             Err(err) => outcome.errors.push(format!("{err:#}")),
             Ok(existing) => {
-                for ruleset in &repo.rulesets {
+                for ruleset in &needs.rulesets {
                     outcome.record(ruleset_drift(gh, mode, &base, ruleset, &existing));
                 }
             }
@@ -245,24 +245,82 @@ fn variables_drift(gh: &Gh, mode: Mode, base: &str, needs: &Needs) -> Result<Vec
     Ok(drift)
 }
 
-/// Missing environments are created bare: no protection rules or branch
-/// policy, so the jobs using them run without waiting.
+/// Missing environments are created without protection rules, so the jobs
+/// using them run without waiting. Those with `deploy_tags` only accept
+/// deployments from refs matching them, and from no branch.
 fn environments_drift(gh: &Gh, mode: Mode, base: &str, needs: &Needs) -> Result<Vec<String>> {
     let actual = gh.get(&format!("{base}/environments?per_page=100"))?;
-    let names: Vec<&str> = actual["environments"]
+    let actual = actual["environments"]
         .as_array()
-        .context("unexpected environments response")?
-        .iter()
-        .filter_map(|e| e["name"].as_str())
-        .collect();
+        .context("unexpected environments response")?;
     let mut drift = Vec::new();
-    for name in &needs.environments {
-        if names.contains(&name.as_str()) {
+    for (name, environment) in &needs.environments {
+        let path = format!("{base}/environments/{name}");
+        let label = format!("environment {name}");
+        let tags_only = json!({ "protected_branches": false, "custom_branch_policies": true });
+        let existing = actual.iter().find(|e| e["name"] == name.as_str());
+        if existing.is_none() {
+            drift.push(format!("{label}: missing"));
+        }
+        if environment.deploy_tags.is_empty() {
+            if existing.is_none() && mode.applies() {
+                gh.api("PUT", &path, None)?;
+            }
             continue;
         }
-        drift.push(format!("environment {name}: missing"));
-        if mode.applies() {
-            gh.api("PUT", &format!("{base}/environments/{name}"), None)?;
+        let policy = existing.map_or(&Value::Null, |e| &e["deployment_branch_policy"]);
+
+        if *policy != tags_only {
+            drift.push(format!(
+                "{label}: deployment policy expected tags only, found {policy}"
+            ));
+            if mode.applies() {
+                let body = json!({ "deployment_branch_policy": tags_only });
+                gh.api("PUT", &path, Some(&body))?;
+            }
+        }
+
+        // There's no policy list until the policy above allows custom ones.
+        let policies = if *policy == tags_only {
+            gh.get(&format!("{path}/deployment-branch-policies?per_page=100"))?
+        } else {
+            json!({ "branch_policies": [] })
+        };
+        let policies = policies["branch_policies"]
+            .as_array()
+            .context("unexpected deployment policies response")?;
+        for pattern in &environment.deploy_tags {
+            let wanted = json!({ "name": pattern, "type": "tag" });
+            if policies.iter().any(|p| subset("", &wanted, p).is_empty()) {
+                continue;
+            }
+            drift.push(format!("{label}: tag {pattern} can't deploy"));
+            if mode.applies() {
+                gh.api(
+                    "POST",
+                    &format!("{path}/deployment-branch-policies"),
+                    Some(&wanted),
+                )?;
+            }
+        }
+        for p in policies {
+            let allowed = p["type"] == "tag"
+                && environment
+                    .deploy_tags
+                    .iter()
+                    .any(|t| p["name"] == t.as_str());
+            if allowed {
+                continue;
+            }
+            drift.push(format!("{label}: {} {} can deploy", p["type"], p["name"]));
+            if mode.applies() {
+                let id = p["id"].as_u64().context("deployment policy without an id")?;
+                gh.api(
+                    "DELETE",
+                    &format!("{path}/deployment-branch-policies/{id}"),
+                    None,
+                )?;
+            }
         }
     }
     Ok(drift)
