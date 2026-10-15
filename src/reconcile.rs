@@ -6,7 +6,7 @@ use serde_json::{Map, Value, json};
 use crate::cargo::Workspace;
 use crate::diff::subset;
 use crate::gh::Gh;
-use crate::manifest::{Manifest, Needs, Repo, Ruleset};
+use crate::manifest::{Actions, Manifest, Needs, Repo, Ruleset};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
@@ -85,13 +85,7 @@ pub fn reconcile(gh: &Gh, manifest: &Manifest, repo: &Repo, mode: Mode) -> Outco
         outcome.record(result);
     }
 
-    if !repo.actions.is_empty() {
-        let path = format!("{base}/actions/permissions/workflow");
-        let result = gh.get(&path).and_then(|actual| {
-            object_drift(gh, mode, "actions", &repo.actions, &actual, "PUT", &path)
-        });
-        outcome.record(result);
-    }
+    actions_drift(gh, mode, &base, &repo.actions, &mut outcome);
 
     if !needs.rulesets.is_empty() {
         match gh.get(&format!(
@@ -206,6 +200,69 @@ fn settings_drift(
         )?);
     }
     Ok(drift)
+}
+
+/// The three Actions permission endpoints, each recorded on its own. The
+/// allowlist only exists while `allowed_actions` is `selected` (GitHub answers
+/// 409 otherwise), so it's set after the permissions that make it so.
+fn actions_drift(gh: &Gh, mode: Mode, base: &str, actions: &Actions, outcome: &mut Outcome) {
+    let path = format!("{base}/actions/permissions");
+    let mut allowed = None;
+    if !actions.permissions.is_empty() {
+        let result = gh.get(&path).and_then(|actual| {
+            allowed = actual.get("allowed_actions").cloned();
+            object_drift(
+                gh,
+                mode,
+                "actions",
+                &actions.permissions,
+                &actual,
+                "PUT",
+                &path,
+            )
+        });
+        if mode.applies() && result.is_ok() {
+            allowed = actions
+                .permissions
+                .get("allowed_actions")
+                .cloned()
+                .or(allowed);
+        }
+        outcome.record(result);
+    }
+
+    if !actions.workflow.is_empty() {
+        let path = format!("{path}/workflow");
+        let result = gh.get(&path).and_then(|actual| {
+            object_drift(
+                gh,
+                mode,
+                "actions.workflow",
+                &actions.workflow,
+                &actual,
+                "PUT",
+                &path,
+            )
+        });
+        outcome.record(result);
+    }
+
+    if !actions.allowlist.is_empty() {
+        let selected = |value: Option<&Value>| value.and_then(Value::as_str) == Some("selected");
+        if selected(allowed.as_ref()) {
+            let path = format!("{path}/selected-actions");
+            let result = gh.get(&path).and_then(|actual| {
+                let label = "actions.selected-actions";
+                object_drift(gh, mode, label, &actions.allowlist, &actual, "PUT", &path)
+            });
+            outcome.record(result);
+        } else if !selected(actions.permissions.get("allowed_actions")) {
+            // When the manifest does ask for it, that's already reported.
+            outcome
+                .skipped
+                .push("actions.selected-actions (allowed_actions isn't selected)".into());
+        }
+    }
 }
 
 fn object_drift(

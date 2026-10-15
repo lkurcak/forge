@@ -62,20 +62,54 @@ delete_branch_on_merge = true
 allow_update_branch = true
 # Nothing has required checks for auto-merge to wait on.
 allow_auto_merge = false
+# Docs live in READMEs and work is tracked elsewhere.
+has_wiki = false
+has_projects = false
 
+
+# PUT /repos/{owner}/{repo}/actions/permissions
+# Only the actions listed in [actions.selected-actions] may run.
+[actions]
+enabled = true
+allowed_actions = "selected"
 
 # PUT /repos/{owner}/{repo}/actions/permissions/workflow
-[actions]
+[actions.workflow]
 default_workflow_permissions = "read"
 # Nothing needs workflows to open PRs yet (release-plz would).
 can_approve_pull_request_reviews = false
+
+# PUT /repos/{owner}/{repo}/actions/permissions/selected-actions
+# Every action a managed repo uses; a new one has to be added here first.
+[actions.selected-actions]
+# actions/* and github/*.
+github_owned_allowed = true
+# Not every Marketplace-verified creator, only the ones listed.
+verified_allowed = false
+patterns_allowed = [
+  # The shared workflows themselves.
+  "lkurcak/*",
+  "dtolnay/rust-toolchain@*",
+  "Swatinem/rust-cache@*",
+  "rust-lang/crates-io-auth-action@*",
+  "vedantmgoyal9/winget-releaser@*",
+  # Container builds.
+  "docker/*",
+  # ocalc.
+  "ocaml/setup-ocaml@*",
+  # homebrew-tap.
+  "Homebrew/*",
+  # home-server's moojctl releases.
+  "softprops/action-gh-release@*",
+]
 
 # Lints every package must set in Cargo.toml's [lints], or inherit from
 # [workspace.lints] with `lints.workspace = true`, at this level or stricter.
 # CI runs clippy with -D warnings, so warn is enough to fail it. forge only
 # reports these; the fix is a commit to the repo.
 # Rust repos run the shared CI. forge only reports a repo that doesn't call
-# it; the fix is a commit to the repo.
+# it; the fix is a commit to the repo. A repo it doesn't suit declines it with
+# the no-rust-ci tag.
 [tags.rust]
 calls = ["rust-ci"]
 
@@ -166,10 +200,10 @@ tags = ["rust", "security"]
 tags = ["rust", "security"]
 
 [repos.acct]
-tags = ["rust", "ghcr"]
+tags = ["rust"]
 
 [repos.finwatch]
-tags = ["rust", "ghcr"]
+tags = ["rust"]
 
 # Infrastructure
 
@@ -186,17 +220,19 @@ tags = ["rust", "security"]
 [repos.entropy-lab]
 tags = ["rust"]
 
+# Compose and config for the home server; its only Rust is the moojctl tool
+# in a subdirectory, released by its own workflow.
 [repos.home-server]
-tags = ["rust"]
 
 [repos.sound]
-tags = ["rust"]
+tags = ["rust", "no-rust-ci"]
 
 [repos.magicube-solver]
 tags = ["rust", "security"]
 
+# A Bevy game on nightly; building it on every push isn't worth the minutes.
 [repos.arena-game]
-tags = ["rust"]
+tags = ["rust", "no-rust-ci"]
 
 [repos.t-lang]
 tags = ["rust", "security"]
