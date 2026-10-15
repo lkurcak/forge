@@ -8,6 +8,7 @@ use std::process::Command;
 use anyhow::{Context, Result, bail};
 use serde_json::Value;
 
+use crate::cargo::Workspace;
 use crate::gh::Gh;
 use crate::manifest::{Needs, Repo};
 
@@ -93,21 +94,8 @@ pub fn check(gh: &Gh, owner: &str, repo: &Repo, needs: &Needs) -> Result<Finding
 }
 
 /// The crates the repo publishes: its package and workspace members, minus
-/// those with `publish = false`. Members may end in `/*`.
+/// those with `publish = false`.
 fn published_crates(gh: &Gh, repo: &str) -> Result<Vec<String>> {
-    let manifest = |dir: &str| -> Result<Option<toml::Table>> {
-        let path = if dir.is_empty() {
-            "Cargo.toml".to_owned()
-        } else {
-            format!("{dir}/Cargo.toml")
-        };
-        gh.file(repo, &path, None)?
-            .map(|text| {
-                text.parse()
-                    .with_context(|| format!("parsing {repo}'s {path}"))
-            })
-            .transpose()
-    };
     let published = |table: &toml::Table| -> Option<String> {
         let package = table.get("package")?;
         let publish = package.get("publish");
@@ -119,35 +107,12 @@ fn published_crates(gh: &Gh, repo: &str) -> Result<Vec<String>> {
         package.get("name")?.as_str().map(str::to_owned)
     };
 
-    let Some(root) = manifest("")? else {
-        return Ok(Vec::new());
-    };
-    let mut names: Vec<String> = published(&root).into_iter().collect();
-    let members = root
-        .get("workspace")
-        .and_then(|w| w.get("members"))
-        .and_then(toml::Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(toml::Value::as_str);
-    for member in members {
-        let dirs = match member.strip_suffix("/*") {
-            Some(parent) => gh
-                .get(&format!("repos/{repo}/contents/{parent}"))?
-                .as_array()
-                .into_iter()
-                .flatten()
-                .filter(|e| e["type"] == "dir")
-                .filter_map(|e| e["path"].as_str().map(str::to_owned))
-                .collect(),
-            None => vec![member.to_owned()],
-        };
-        for dir in dirs {
-            if let Some(name) = manifest(&dir)?.as_ref().and_then(published)
-                && !names.contains(&name)
-            {
-                names.push(name);
-            }
+    let mut names: Vec<String> = Vec::new();
+    for (_, package) in Workspace::read(gh, repo)?.map_or_default(|w| w.packages) {
+        if let Some(name) = published(&package)
+            && !names.contains(&name)
+        {
+            names.push(name);
         }
     }
     Ok(names)

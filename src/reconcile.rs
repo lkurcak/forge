@@ -3,6 +3,7 @@ use std::fs;
 use anyhow::{Context, Result};
 use serde_json::{Map, Value};
 
+use crate::cargo::Workspace;
 use crate::diff::subset;
 use crate::gh::Gh;
 use crate::manifest::{Manifest, Needs, Repo, Ruleset};
@@ -120,6 +121,16 @@ pub fn reconcile(gh: &Gh, manifest: &Manifest, repo: &Repo, mode: Mode) -> Outco
     if !needs.environments.is_empty() {
         let result = environments_drift(gh, mode, &base, &needs);
         outcome.record(result);
+    }
+
+    if !needs.lints.is_empty() {
+        match Workspace::read(gh, &format!("{owner}/{}", repo.name)) {
+            Ok(Some(workspace)) => outcome.manual.extend(workspace.lint_problems(&needs.lints)),
+            Ok(None) => outcome
+                .skipped
+                .push("lints (no Cargo.toml at the root)".into()),
+            Err(err) => outcome.errors.push(format!("{err:#}")),
+        }
     }
 
     if repo.release_tag_prefix.is_some() {

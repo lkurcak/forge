@@ -67,6 +67,14 @@ default_workflow_permissions = "read"
 # Nothing needs workflows to open PRs yet (release-plz would).
 can_approve_pull_request_reviews = false
 
+# Lints every package must set in Cargo.toml's [lints], or inherit from
+# [workspace.lints] with `lints.workspace = true`, at this level or stricter.
+# CI runs clippy with -D warnings, so warn is enough to fail it. forge only
+# reports these; the fix is a commit to the repo.
+[tags.rust.lints.clippy]
+# Modules as foo.rs next to foo/, never foo/mod.rs.
+mod_module_files = "warn"
+
 # Its crates.io and Homebrew jobs run in this environment, and crates.io's
 # trusted publisher is configured for it (workflow release.yml, environment
 # release). forge can't see the crates.io side; set it in the crate's settings.

@@ -1,3 +1,4 @@
+mod cargo;
 mod diff;
 mod gh;
 mod manifest;

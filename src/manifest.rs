@@ -6,6 +6,7 @@ use anyhow::{Context, Result};
 use serde::Deserialize;
 use serde_json::{Map, Value};
 
+use crate::cargo::Lints;
 use crate::workflow::{Call, SharedWorkflow};
 
 #[derive(Deserialize)]
@@ -43,6 +44,9 @@ struct RawTag {
     /// Deployment environments that must exist.
     #[serde(default)]
     environments: Vec<String>,
+    /// Lints every package's `[lints]` must set, at least this strictly.
+    #[serde(default)]
+    lints: Lints,
 }
 
 #[derive(Deserialize)]
@@ -93,6 +97,7 @@ struct Tag {
     secrets: BTreeMap<String, PathBuf>,
     forbidden_secrets: Vec<String>,
     environments: Vec<String>,
+    lints: Lints,
 }
 
 /// What a repository needs, from its manifest tags plus the tags its
@@ -110,6 +115,8 @@ pub struct Needs {
     pub environments: Vec<String>,
     /// Targets the latest release must have a binary archive for.
     pub release_targets: Vec<String>,
+    /// Lints every package's `[lints]` must set, at least this strictly.
+    pub lints: Lints,
 }
 
 #[derive(Clone)]
@@ -196,6 +203,7 @@ impl Manifest {
                         .collect(),
                     forbidden_secrets: tag.forbidden_secrets,
                     environments: tag.environments,
+                    lints: tag.lints,
                 };
                 (name, tag)
             })
@@ -240,6 +248,13 @@ impl Manifest {
             needs.secrets.extend(tag.secrets.clone());
             push_new(&mut needs.forbidden_secrets, &tag.forbidden_secrets);
             push_new(&mut needs.environments, &tag.environments);
+            for (group, lints) in &tag.lints {
+                needs
+                    .lints
+                    .entry(group.clone())
+                    .or_default()
+                    .extend(lints.clone());
+            }
         }
 
         if repo.release_tag_prefix.is_some() {

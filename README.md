@@ -19,6 +19,9 @@ forge apply [REPO…]   # fix drift
 - `[tags.<name>]` adds Actions variables and secrets to every repo with that tag.
   Secret values come from local files (e.g. `~/.config/forge/tap-app.pem`) and are
   only set when the secret is missing, since GitHub never reveals them.
+- `[tags.<name>.lints]` lists lints each Cargo package must set (or inherit
+  from `[workspace.lints]`), in Cargo's `[lints]` shape. Missing ones are only
+  reported, since fixing them means committing to the repo.
 - Rust repos share their CI and release workflows,
   [`rust-ci.yml`](.github/workflows/rust-ci.yml) and
   [`rust-release.yml`](.github/workflows/rust-release.yml), calling them from
