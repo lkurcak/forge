@@ -221,8 +221,9 @@ tags = ["rust", "security"]
 tags = ["rust"]
 
 # Compose and config for the home server; its only Rust is the moojctl tool
-# in a subdirectory, released by its own workflow.
+# in a subdirectory, released by its own workflow under tags naming the tool.
 [repos.home-server]
+release_tag_prefix = "moojctl-v"
 
 [repos.sound]
 tags = ["rust", "no-rust-ci"]
