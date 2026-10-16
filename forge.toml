@@ -170,10 +170,10 @@ rulesets = ["protect-default-branch"]
 tags = ["rust", "security"]
 rulesets = ["require-pr"]
 
-# Its source repo is private, so the archives are published on homebrew-tap's
-# typr-dist-vX.Y.Z releases instead.
+# Private, so its Homebrew formula installs binaries, published on
+# homebrew-tap's typr-dist-vX.Y.Z releases.
 [repos.typr]
-tags = ["rust", "homebrew"]
+tags = ["rust"]
 
 # Not on the shared workflow, so its archives are listed here. OCaml builds
 # Windows binaries with MinGW.

@@ -43,7 +43,13 @@ on:
         type: boolean
         default: false
       homebrew:
-        description: Open a PR bumping Formula/{repo}.rb in lkurcak/homebrew-tap.
+        description: >-
+          Open a PR bumping Formula/{repo}.rb in lkurcak/homebrew-tap. From a
+          public repo the formula builds the tag's source. Homebrew can't
+          download a private repo's source or releases, so from one it installs
+          the binaries archives instead (set binaries too), which go to a
+          {repo}-dist-vX.Y.Z release on the tap. The formula's first version is
+          written by hand; releases only update its url and sha256 lines.
         type: boolean
         default: false
       winget:
@@ -140,6 +146,10 @@ jobs:
           echo "any=$(jq 'length > 0' <<<"$include")" >> "$GITHUB_OUTPUT"
       - if: inputs.crates-io
         run: cargo publish --workspace --dry-run --locked
+      - if: inputs.homebrew && github.event.repository.private && !inputs.binaries
+        run: |
+          echo "::error::Homebrew installs a private repo's binaries archives: set binaries: true"
+          exit 1
 
   build:
     needs: verify
@@ -173,7 +183,7 @@ jobs:
           case "$TARGET" in *windows*) exe=.exe ;; *) exe= ;; esac
           mkdir "$ARCHIVE"
           cp "target/$TARGET/release/$BIN$exe" "$ARCHIVE/"
-          cp README* LICENSE* UNLICENSE* "$ARCHIVE/" 2>/dev/null || true
+          cp README* LICENSE* UNLICENSE* COPYRIGHT* NOTICE* "$ARCHIVE/" 2>/dev/null || true
           if [ -n "$exe" ]; then
             # PowerShell is on every Windows image, ARM included; 7-Zip may not be.
             pwsh -NoProfile -Command "Compress-Archive -Path '$ARCHIVE/*' -DestinationPath '$ARCHIVE.zip'"
@@ -233,6 +243,10 @@ jobs:
     environment: release
     permissions:
       contents: read
+    env:
+      TAP: lkurcak/homebrew-tap
+      VERSION: ${{ needs.verify.outputs.version }}
+      PRIVATE: ${{ github.event.repository.private }}
     steps:
       - uses: actions/create-github-app-token@v3
         id: app-token
@@ -242,22 +256,74 @@ jobs:
           repositories: homebrew-tap
       - uses: actions/checkout@v7
         with:
-          repository: lkurcak/homebrew-tap
+          repository: ${{ env.TAP }}
           token: ${{ steps.app-token.outputs.token }}
+      - if: env.PRIVATE == 'true'
+        uses: actions/download-artifact@v8
+        with:
+          path: ${{ runner.temp }}/dist
+          merge-multiple: true
+      - if: env.PRIVATE == 'true'
+        name: Publish the archives on the tap
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          DIST: ${{ runner.temp }}/dist
+        run: |
+          tag="${REPO}-dist-v${VERSION}"
+          # A rerun of this job finds the release already there.
+          if gh release view "$tag" --repo "$TAP" >/dev/null 2>&1; then
+            gh release upload "$tag" "$DIST"/*.tar.gz --repo "$TAP" --clobber
+          else
+            gh release create "$tag" "$DIST"/*.tar.gz --repo "$TAP" \
+              --title "${REPO} v${VERSION}" \
+              --notes "Archives of ${REPO} v${VERSION}, whose source repository is private."
+          fi
+      - if: env.PRIVATE != 'true'
+        name: Point the formula at the source
+        run: |
+          url="https://github.com/${GITHUB_REPOSITORY}/archive/refs/tags/${GITHUB_REF_NAME}.tar.gz"
+          sha256=$(curl -fsSL "$url" | sha256sum | cut -d' ' -f1)
+          sed -i -E \
+            -e "s|^  url \".*\"$|  url \"${url}\"|" \
+            -e "s|^  sha256 \"[0-9a-f]+\"$|  sha256 \"${sha256}\"|" \
+            "Formula/${REPO}.rb"
+      # Each url names one archive, by target; the sha256 after it is that
+      # archive's.
+      - if: env.PRIVATE == 'true'
+        name: Point the formula at the archives
+        env:
+          DIST: ${{ runner.temp }}/dist
+        shell: python
+        run: |
+          import hashlib, os, pathlib, re, sys
+
+          repo, version, dist = os.environ["REPO"], os.environ["VERSION"], os.environ["DIST"]
+          root = f"https://github.com/{os.environ['TAP']}/releases/download/{repo}-dist-v{version}"
+          archive = re.compile(rf"/{re.escape(repo)}-v\d+\.\d+\.\d+-(.+)\.tar\.gz$")
+          formula = pathlib.Path(f"Formula/{repo}.rb")
+          lines, sha = [], None
+          for line in formula.read_text().splitlines(keepends=True):
+              if url := re.match(r'(\s*)url "(.*)"\s*$', line):
+                  target = archive.search(url[2])
+                  if not target:
+                      sys.exit(f"::error::{formula}: {url[2]} isn't one of {repo}'s archives")
+                  name = f"{repo}-v{version}-{target[1]}.tar.gz"
+                  path = pathlib.Path(dist, name)
+                  if not path.exists():
+                      sys.exit(f"::error::{formula} wants {name}, which this release doesn't build")
+                  sha = hashlib.sha256(path.read_bytes()).hexdigest()
+                  line = f'{url[1]}url "{root}/{name}"\n'
+              elif sha and (old := re.match(r'(\s*)sha256 "[0-9a-f]+"\s*$', line)):
+                  line = f'{old[1]}sha256 "{sha}"\n'
+                  sha = None
+              lines.append(line)
+          formula.write_text("".join(lines))
       - name: Open formula bump PR
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
-          VERSION: ${{ needs.verify.outputs.version }}
         run: |
-          url="https://github.com/${GITHUB_REPOSITORY}/archive/refs/tags/${GITHUB_REF_NAME}.tar.gz"
-          sha256=$(curl -fsSL "$url" | sha256sum | cut -d' ' -f1)
           formula="Formula/${REPO}.rb"
-
-          sed -i -E \
-            -e "s|^  url \".*\"$|  url \"${url}\"|" \
-            -e "s|^  sha256 \"[0-9a-f]+\"$|  sha256 \"${sha256}\"|" \
-            "$formula"
           git diff --exit-code --quiet "$formula" && { echo "::error::$formula unchanged"; exit 1; }
 
           branch="bump-${REPO}-${VERSION}"
