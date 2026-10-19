@@ -30,7 +30,10 @@ input on, running `forge apply`, and cutting a release.
    Windows-only or Unix-only code paths are the usual suspects. The archives ship the
    binary named like the repo, or else the workspace's only binary (t-lang ships `t`);
    anything else fails the release's verify job. `scripts/winget-new.sh` still assumes
-   `{repo}.exe`, so fix its manifest by hand for a differently named binary.
+   `{repo}.exe`, so fix its manifest by hand for a differently named binary. For winget,
+   the binary must exit 0 when run without arguments (winget's validation does exactly
+   that, and verify checks it): with clap, make the subcommand an `Option` and print help
+   when it's missing, like tend does.
 2. **Turn the inputs on** in the repo's `.github/workflows/release.yml`. If it doesn't
    call the shared workflow yet, replace the file with the call (copy gud's). The repo
    must be in `forge.toml` (any tags; channels don't go there). Commit it with the rest

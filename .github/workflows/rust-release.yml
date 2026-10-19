@@ -121,6 +121,21 @@ jobs:
             exit 1
           fi
           echo "bin=$bin" >> "$GITHUB_OUTPUT"
+      # winget's validation runs the executable without arguments and holds
+      # the PR for a moderator unless it exits 0, on every update too. clap
+      # exits 2 when a required subcommand is missing, on any platform.
+      - if: inputs.winget
+        name: Check the binary exits 0 without arguments
+        env:
+          BIN: ${{ steps.bin.outputs.bin }}
+        run: |
+          cargo build --locked --quiet --bin "$BIN"
+          status=0
+          "target/debug/$BIN" </dev/null >/dev/null 2>&1 || status=$?
+          if [ "$status" -ne 0 ]; then
+            echo "::error::$BIN exits $status without arguments, and winget's validation flags anything but 0: print help instead (with clap, make the subcommand an Option)"
+            exit 1
+          fi
       - name: Pick a runner per target
         id: matrix
         env:
