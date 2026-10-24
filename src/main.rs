@@ -1,10 +1,13 @@
 mod cargo;
+mod days;
+mod dependabot;
 mod diff;
 mod gh;
 mod manifest;
 mod progress;
 mod reconcile;
 mod release;
+mod stale;
 mod workflow;
 
 use std::fmt::Write as _;
@@ -51,6 +54,12 @@ enum Command {
     },
     /// List managed repositories, and owned ones the manifest doesn't cover.
     List,
+    /// List open issues and PRs in any owned repo that have gone quiet.
+    Stale {
+        /// Days without activity before one counts as quiet.
+        #[arg(long, default_value_t = 90)]
+        days: i64,
+    },
 }
 
 fn main() -> ExitCode {
@@ -75,6 +84,7 @@ fn run() -> Result<ExitCode> {
             update_secrets,
         } => sync(&gh, &manifest, &repos, Mode::Apply { update_secrets }),
         Command::List => list(&gh, &manifest),
+        Command::Stale { days } => stale(&gh, &manifest, days),
     }
 }
 
@@ -241,5 +251,19 @@ fn list(gh: &Gh, manifest: &Manifest) -> Result<ExitCode> {
         }
     }
 
+    Ok(ExitCode::SUCCESS)
+}
+
+fn stale(gh: &Gh, manifest: &Manifest, days: i64) -> Result<ExitCode> {
+    let repos = stale::find(gh, &manifest.owner, days)?;
+    if repos.is_empty() {
+        println!("nothing open has been quiet for {days} days");
+    }
+    for (repo, lines) in repos {
+        println!("{repo}");
+        for line in lines {
+            println!("    {line}");
+        }
+    }
     Ok(ExitCode::SUCCESS)
 }

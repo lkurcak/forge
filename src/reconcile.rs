@@ -145,6 +145,14 @@ pub fn reconcile(gh: &Gh, manifest: &Manifest, repo: &Repo, mode: Mode) -> Outco
         }
     }
 
+    match crate::dependabot::check(gh, &base) {
+        Ok(findings) => {
+            outcome.manual.extend(findings.problems);
+            outcome.pending.extend(findings.pending);
+        }
+        Err(err) => outcome.errors.push(format!("{err:#}")),
+    }
+
     outcome
 }
 

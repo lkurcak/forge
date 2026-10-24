@@ -9,6 +9,7 @@ cargo install --path .
 forge list            # managed repos, plus owned repos the manifest doesn't cover
 forge check [REPO…]   # report drift; exits 1 if anything differs
 forge apply [REPO…]   # fix drift
+forge stale           # open issues and PRs nobody has touched in 90 days
 ```
 
 - `forge.toml` lists the managed repos. Top-level `settings`, `actions` and
@@ -51,6 +52,12 @@ forge apply [REPO…]   # fix drift
   formula and winget-pkgs, for repos shipping there. An open PR delivering it
   shows as `pending`; the rest is only reported, since the fix is the next
   release.
+- Open Dependabot alerts are reported, as `pending` while a bot PR fixing
+  one is under a week old; dismiss on GitHub any that don't apply. Bot PRs
+  open longer than a week are reported too.
+
+`forge stale [--days 90]` lists open issues and PRs in every owned repo,
+managed or not, that have had no activity for that long. It only lists them.
 
 Only keys present in the manifest are checked, so the live state can carry
 anything else without counting as drift.
