@@ -28,6 +28,17 @@ struct RawManifest {
     tags: BTreeMap<String, RawTag>,
     #[serde(default)]
     repos: BTreeMap<String, RawRepo>,
+    #[serde(default)]
+    stale: Stale,
+}
+
+/// `[stale]`: what `forge stale` leaves out.
+#[derive(Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Stale {
+    /// Issues and PRs with any of these labels, like a backlog of feature ideas.
+    #[serde(default)]
+    pub ignore_labels: Vec<String>,
 }
 
 /// Requirements for every repository carrying a tag.
@@ -97,6 +108,7 @@ pub struct Manifest {
     pub owner: String,
     pub repos: Vec<Repo>,
     pub workflows: Vec<SharedWorkflow>,
+    pub stale: Stale,
     tags: BTreeMap<String, Tag>,
 }
 
@@ -274,6 +286,7 @@ impl Manifest {
             owner: raw.owner,
             repos,
             workflows,
+            stale: raw.stale,
             tags,
         })
     }

@@ -57,7 +57,9 @@ forge stale           # open issues and PRs nobody has touched in 90 days
   open longer than a week are reported too.
 
 `forge stale [--days 90]` lists open issues and PRs in every owned repo,
-managed or not, that have had no activity for that long. It only lists them.
+managed or not, that have had no activity for that long, leaving out any
+with a label in `[stale] ignore_labels` (a backlog of feature ideas, say).
+It only lists them.
 
 Only keys present in the manifest are checked, so the live state can carry
 anything else without counting as drift.
