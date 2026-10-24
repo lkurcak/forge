@@ -24,7 +24,7 @@ pub fn find(
 ) -> Result<BTreeMap<String, Vec<String>>> {
     let today = days::today();
     let cutoff = days::format(today - min_days);
-    let mut query = format!("user:{owner}+is:open+archived:false+updated:%3C{cutoff}");
+    let mut query = format!("user:{owner}+is:open+archived:false+updated:%3C%3D{cutoff}");
     for label in ignore_labels {
         write!(query, "+-label:%22{}%22", label.replace(' ', "+"))?;
     }
