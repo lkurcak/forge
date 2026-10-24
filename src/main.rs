@@ -255,7 +255,7 @@ fn list(gh: &Gh, manifest: &Manifest) -> Result<ExitCode> {
 }
 
 fn stale(gh: &Gh, manifest: &Manifest, days: i64) -> Result<ExitCode> {
-    let repos = stale::find(gh, &manifest.owner, days)?;
+    let repos = stale::find(gh, &manifest.owner, days, &manifest.stale.ignore_labels)?;
     if repos.is_empty() {
         println!("nothing open has been quiet for {days} days");
     }

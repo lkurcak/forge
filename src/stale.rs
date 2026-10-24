@@ -14,11 +14,20 @@ use crate::gh::Gh;
 /// The search API stops at 1000 results.
 const PAGES: u32 = 10;
 
-/// Lines per repo, each issue or PR quiet for at least `min_days`.
-pub fn find(gh: &Gh, owner: &str, min_days: i64) -> Result<BTreeMap<String, Vec<String>>> {
+/// Lines per repo, each issue or PR quiet for at least `min_days` and
+/// carrying none of `ignore_labels`.
+pub fn find(
+    gh: &Gh,
+    owner: &str,
+    min_days: i64,
+    ignore_labels: &[String],
+) -> Result<BTreeMap<String, Vec<String>>> {
     let today = days::today();
     let cutoff = days::format(today - min_days);
-    let query = format!("user:{owner}+is:open+archived:false+updated:%3C{cutoff}");
+    let mut query = format!("user:{owner}+is:open+archived:false+updated:%3C{cutoff}");
+    for label in ignore_labels {
+        write!(query, "+-label:%22{}%22", label.replace(' ', "+"))?;
+    }
 
     let mut items = Vec::new();
     for page in 1..=PAGES {

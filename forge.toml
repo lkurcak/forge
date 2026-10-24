@@ -12,6 +12,11 @@ owner = "lkurcak"
 # latest release.
 release_tag_prefix = "v"
 
+# `forge stale` leaves out issues with these labels: feature ideas waiting in
+# the backlog aren't stuck, however long they wait.
+[stale]
+ignore_labels = ["enhancement"]
+
 # Workflows Rust repos share, keyed by the file in .github/workflows/ a repo
 # calls them from. A repo opts in by making that file a call, and configures
 # the workflow through its inputs, e.g. what a release ships:
