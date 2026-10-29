@@ -37,7 +37,9 @@ forge stale           # open issues and PRs nobody has touched in 90 days
 - The `conventional-commits` tag requires the shared
   [`pr-title.yml`](.github/workflows/pr-title.yml) workflow, called from the
   repo's `.github/workflows/pr.yml`, plus PRs and a passing
-  `pr-title / PR title` check before merging. All tracked repos carry it.
+  `pr-title / PR title` check before merging. Tracked repos carry it except
+  `homebrew-tap`, which uses the check-only `pr-title` tag so its existing
+  `brew pr-pull` publisher can push bottle commits directly to main.
   Private repos run the check too, but rulesets there still need GitHub Pro.
 - `[tags.<name>.lints]` lists lints each Cargo package must set (or inherit
   from `[workspace.lints]`), in Cargo's `[lints]` shape. Missing ones are only

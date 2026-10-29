@@ -450,16 +450,20 @@ mod tests {
     }
 
     #[test]
-    fn tracked_repos_require_conventional_titles() {
+    fn tracked_repos_require_the_title_workflow() {
         let manifest =
             Manifest::load(&Path::new(env!("CARGO_MANIFEST_DIR")).join("forge.toml")).unwrap();
         let calls: Vec<_> = manifest.workflows.iter().map(|_| None).collect();
         for repo in &manifest.repos {
             let needs = manifest.needs(repo, &calls, true);
-            assert!(repo.tags.iter().any(|tag| tag == "conventional-commits"));
             assert!(needs.calls.iter().any(|call| call == "pr-title"));
             for name in ["require-pr", "require-pr-title"] {
-                assert!(needs.rulesets.iter().any(|rule| rule.name == name));
+                assert_eq!(
+                    needs.rulesets.iter().any(|rule| rule.name == name),
+                    repo.name != "homebrew-tap",
+                    "{}: {name}",
+                    repo.name
+                );
             }
         }
     }

@@ -113,6 +113,10 @@ patterns_allowed = [
 # Conventional Commit PR titles become squash commit subjects. Each repo
 # commits a pr.yml caller; forge checks it and applies the merge rules.
 # Required-check rules are deferred while a required workflow is missing.
+# The check-only tag lets homebrew-tap keep its direct-push bottle publisher.
+[tags.pr-title]
+calls = ["pr-title"]
+
 [tags.conventional-commits]
 calls = ["pr-title"]
 rulesets = ["require-pr", "require-pr-title"]
@@ -223,7 +227,8 @@ tags = ["rust", "conventional-commits"]
 
 # Its releases hold bottles and binaries for other repos.
 [repos.homebrew-tap]
-tags = ["security", "conventional-commits"]
+# brew pr-pull imports PRs and pushes bottle commits directly to main.
+tags = ["security", "pr-title"]
 releases = false
 
 [repos.forge]
