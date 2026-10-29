@@ -345,9 +345,9 @@ jobs:
           git config user.name "${APP_SLUG}[bot]"
           git config user.email "$(gh api "/users/${APP_SLUG}%5Bbot%5D" --jq .id)+${APP_SLUG}[bot]@users.noreply.github.com"
           git switch -c "$branch"
-          git commit -am "${REPO} ${VERSION}"
+          git commit -am "chore(${REPO}): update to ${VERSION}"
           git push -u origin "$branch"
-          gh pr create --title "${REPO} ${VERSION}" --body "Automated bump from ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/tag/${GITHUB_REF_NAME}"
+          gh pr create --title "chore(${REPO}): update to ${VERSION}" --body "Automated bump from ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/tag/${GITHUB_REF_NAME}"
 
   winget:
     needs: [verify, github-release]

@@ -74,12 +74,18 @@ impl SharedWorkflow {
         let yaml: Value = serde_yaml_ng::from_str(&text)
             .with_context(|| format!("parsing {}", file.display()))?;
 
-        let inputs = yaml["on"]["workflow_call"]["inputs"]
-            .as_object()
-            .with_context(|| format!("{} has no workflow_call inputs", file.display()))?
-            .keys()
-            .cloned()
-            .collect();
+        let workflow_call = yaml["on"]
+            .get("workflow_call")
+            .with_context(|| format!("{} has no workflow_call trigger", file.display()))?;
+        let inputs = match workflow_call.get("inputs") {
+            None => Vec::new(),
+            Some(inputs) => inputs
+                .as_object()
+                .with_context(|| format!("{} has invalid workflow_call inputs", file.display()))?
+                .keys()
+                .cloned()
+                .collect(),
+        };
         let targets = yaml["env"]
             .as_object()
             .into_iter()
@@ -218,6 +224,23 @@ jobs:
         assert!(shared.inputs.contains(&"winget".to_owned()));
         assert!(shared.targets["binaries"].contains(&"x86_64-pc-windows-msvc".to_owned()));
         assert!(shared.targets["winget"].contains(&"aarch64-pc-windows-msvc".to_owned()));
+    }
+
+    #[test]
+    fn reads_a_workflow_without_inputs() {
+        let shared = SharedWorkflow::load(
+            Path::new(env!("CARGO_MANIFEST_DIR")),
+            "pr.yml",
+            "lkurcak/forge/.github/workflows/pr-title.yml@v1",
+        )
+        .unwrap();
+        let call = shared
+            .parse_call(include_str!("../.github/workflows/pr.yml"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(shared.inputs, Vec::<String>::new());
+        assert_eq!(shared.targets(&call), Vec::<String>::new());
+        assert_eq!(shared.problems(&call), Vec::<String>::new());
     }
 
     #[test]
