@@ -74,9 +74,11 @@ pub fn reconcile(gh: &Gh, manifest: &Manifest, repo: &Repo, mode: Mode) -> Outco
     outcome
         .manual
         .extend(needs.visibility_problems.iter().cloned());
+    let mut missing_workflows = false;
     for (workflow, call) in manifest.workflows.iter().zip(&calls) {
         if call.is_none() && needs.calls.contains(&workflow.name) {
             outcome.manual.push(workflow.missing());
+            missing_workflows = true;
         }
     }
 
@@ -87,24 +89,14 @@ pub fn reconcile(gh: &Gh, manifest: &Manifest, repo: &Repo, mode: Mode) -> Outco
 
     actions_drift(gh, mode, &base, &repo.actions, &mut outcome);
 
-    if !needs.rulesets.is_empty() {
-        match gh.get(&format!(
-            "{base}/rulesets?includes_parents=false&per_page=100"
-        )) {
-            // Free accounts only get rulesets on public repositories.
-            Err(err) if err.to_string().contains("Upgrade to GitHub Pro") => {
-                outcome
-                    .skipped
-                    .push("rulesets (private repos need GitHub Pro)".into());
-            }
-            Err(err) => outcome.errors.push(format!("{err:#}")),
-            Ok(existing) => {
-                for ruleset in &needs.rulesets {
-                    outcome.record(ruleset_drift(gh, mode, &base, ruleset, &existing));
-                }
-            }
-        }
-    }
+    rulesets_drift(
+        gh,
+        mode,
+        &base,
+        &needs.rulesets,
+        missing_workflows,
+        &mut outcome,
+    );
 
     if !needs.variables.is_empty() {
         let result = variables_drift(gh, mode, &base, &needs);
@@ -291,6 +283,50 @@ fn object_drift(
         gh.api(method, path, Some(&expected))?;
     }
     Ok(drift)
+}
+
+fn rulesets_drift(
+    gh: &Gh,
+    mode: Mode,
+    base: &str,
+    rulesets: &[Ruleset],
+    missing_workflows: bool,
+    outcome: &mut Outcome,
+) {
+    if rulesets.is_empty() {
+        return;
+    }
+    match gh.get(&format!(
+        "{base}/rulesets?includes_parents=false&per_page=100"
+    )) {
+        // Free accounts only get rulesets on public repositories.
+        Err(err) if err.to_string().contains("Upgrade to GitHub Pro") => {
+            outcome
+                .skipped
+                .push("rulesets (private repos need GitHub Pro)".into());
+        }
+        Err(err) => outcome.errors.push(format!("{err:#}")),
+        Ok(existing) => {
+            for ruleset in rulesets {
+                // Don't require a check before the repo can run its workflow.
+                if mode.applies()
+                    && missing_workflows
+                    && ruleset.body["rules"].as_array().is_some_and(|rules| {
+                        rules
+                            .iter()
+                            .any(|rule| rule["type"] == "required_status_checks")
+                    })
+                {
+                    outcome.skipped.push(format!(
+                        "ruleset {} (install required workflows first)",
+                        ruleset.name
+                    ));
+                    continue;
+                }
+                outcome.record(ruleset_drift(gh, mode, base, ruleset, &existing));
+            }
+        }
+    }
 }
 
 fn ruleset_drift(

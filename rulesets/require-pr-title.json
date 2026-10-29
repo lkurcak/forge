@@ -12,7 +12,7 @@
     {
       "type": "required_status_checks",
       "parameters": {
-        "required_status_checks": [{ "context": "PR title" }],
+        "required_status_checks": [{ "context": "pr-title / PR title" }],
         "strict_required_status_checks_policy": false
       }
     }

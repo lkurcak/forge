@@ -32,6 +32,13 @@ forge stale           # open issues and PRs nobody has touched in 90 days
   `deploy_tags = [...]` lets only those tag patterns deploy to it, and no branch.
 - A tag's `calls = [...]` names shared workflows its repos must call; one
   that doesn't is reported, unless it carries `no-<workflow>` to decline it.
+  In apply mode, rulesets requiring status checks are deferred while a
+  required workflow is missing, so a repo isn't blocked on a check it can't run.
+- The `conventional-commits` tag requires the shared
+  [`pr-title.yml`](.github/workflows/pr-title.yml) workflow, called from the
+  repo's `.github/workflows/pr.yml`, plus PRs and a passing
+  `pr-title / PR title` check before merging. All tracked repos carry it.
+  Private repos run the check too, but rulesets there still need GitHub Pro.
 - `[tags.<name>.lints]` lists lints each Cargo package must set (or inherit
   from `[workspace.lints]`), in Cargo's `[lints]` shape. Missing ones are only
   reported, since fixing them means committing to the repo.
@@ -64,11 +71,11 @@ It only lists them.
 Only keys present in the manifest are checked, so the live state can carry
 anything else without counting as drift.
 
-Contributing to forge? See [CONTRIBUTING.md](CONTRIBUTING.md) for the PR title
-convention. The [PR title workflow](.github/workflows/pr-title.yml) runs here
-and can be called by other repos later; this pilot does not change their policy.
-Merge the workflow before running `forge apply forge` to enable the required
-check on forge's default branch.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the PR title convention. When adding
+the policy to a repo, copy [pr.yml](.github/workflows/pr.yml), merge it, then
+run `forge apply REPO` with the updated forge binary. `forge check REPO`
+reports a missing caller; forge doesn't commit workflow files for you.
+Existing PRs may need a title edit or new push to run the new check.
 
 ## Credentials
 

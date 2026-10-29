@@ -17,7 +17,7 @@ release_tag_prefix = "v"
 [stale]
 ignore_labels = ["enhancement"]
 
-# Workflows Rust repos share, keyed by the file in .github/workflows/ a repo
+# Shared workflows, keyed by the file in .github/workflows/ a repo
 # calls them from. A repo opts in by making that file a call, and configures
 # the workflow through its inputs, e.g. what a release ships:
 #
@@ -46,12 +46,13 @@ ignore_labels = ["enhancement"]
 [workflows]
 "release.yml" = "lkurcak/forge/.github/workflows/rust-release.yml@v1"
 "ci.yml" = "lkurcak/forge/.github/workflows/rust-ci.yml@v1"
+"pr.yml" = "lkurcak/forge/.github/workflows/pr-title.yml@v1"
 
 # Rulesets are opt-in per repo: `rulesets = [...]` names files in rulesets/,
 # without the .json extension.
 #   protect-default-branch  no deleting or force-pushing the default branch
 #   require-pr              changes to the default branch must go through a PR
-#   require-pr-title        the PR title check must pass (forge pilot only)
+#   require-pr-title        the shared PR title check must pass
 #   protect-release-tags    no deleting or moving v* tags
 # Tags can add rulesets too, with `rulesets = [...]` in their table.
 # Private repos are skipped: rulesets there need GitHub Pro.
@@ -108,6 +109,13 @@ patterns_allowed = [
   # home-server's moojctl releases.
   "softprops/action-gh-release@*",
 ]
+
+# Conventional Commit PR titles become squash commit subjects. Each repo
+# commits a pr.yml caller; forge checks it and applies the merge rules.
+# Required-check rules are deferred while a required workflow is missing.
+[tags.conventional-commits]
+calls = ["pr-title"]
+rulesets = ["require-pr", "require-pr-title"]
 
 # Lints every package must set in Cargo.toml's [lints], or inherit from
 # [workspace.lints] with `lints.workspace = true`, at this level or stricter.
@@ -169,22 +177,22 @@ secrets = { WINGET_PAT = "~/.config/forge/winget-pat" }
 # Published
 
 [repos.gud]
-tags = ["rust", "security"]
+tags = ["rust", "security", "conventional-commits"]
 rulesets = ["protect-default-branch"]
 
 [repos.tend]
-tags = ["rust", "security"]
+tags = ["rust", "security", "conventional-commits"]
 rulesets = ["require-pr"]
 
 # Private, so its Homebrew formula installs binaries, published on
 # homebrew-tap's typr-dist-vX.Y.Z releases.
 [repos.typr]
-tags = ["rust"]
+tags = ["rust", "conventional-commits"]
 
 # Not on the shared workflow, so its archives are listed here. OCaml builds
 # Windows binaries with MinGW.
 [repos.ocalc]
-tags = ["ocaml", "homebrew", "security"]
+tags = ["ocaml", "homebrew", "security", "conventional-commits"]
 rulesets = ["protect-release-tags"]
 release_targets = [
   "aarch64-apple-darwin",
@@ -194,60 +202,59 @@ release_targets = [
 ]
 
 [repos.folktime]
-tags = ["rust", "security"]
+tags = ["rust", "security", "conventional-commits"]
 
 [repos.split-paragraphs]
-tags = ["rust", "security"]
+tags = ["rust", "security", "conventional-commits"]
 
 [repos.auburn]
-tags = ["rust", "security"]
+tags = ["rust", "security", "conventional-commits"]
 
 [repos.math]
-tags = ["rust", "security"]
+tags = ["rust", "security", "conventional-commits"]
 
 [repos.acct]
-tags = ["rust"]
+tags = ["rust", "conventional-commits"]
 
 [repos.finwatch]
-tags = ["rust"]
+tags = ["rust", "conventional-commits"]
 
 # Infrastructure
 
 # Its releases hold bottles and binaries for other repos.
 [repos.homebrew-tap]
-tags = ["security"]
+tags = ["security", "conventional-commits"]
 releases = false
 
 [repos.forge]
-tags = ["rust", "security"]
-# Merge pr-title.yml before applying: the required check must exist first.
-rulesets = ["require-pr", "require-pr-title"]
+tags = ["rust", "security", "conventional-commits"]
 
 # Active
 
 [repos.entropy-lab]
-tags = ["rust"]
+tags = ["rust", "conventional-commits"]
 
 # Compose and config for the home server; its only Rust is the moojctl tool
 # in a subdirectory, released by its own workflow under tags naming the tool.
 [repos.home-server]
+tags = ["conventional-commits"]
 release_tag_prefix = "moojctl-v"
 
 [repos.sound]
-tags = ["rust", "no-rust-ci"]
+tags = ["rust", "no-rust-ci", "conventional-commits"]
 
 [repos.magicube-solver]
-tags = ["rust", "security"]
+tags = ["rust", "security", "conventional-commits"]
 
 # A Bevy game on nightly; building it on every push isn't worth the minutes.
 [repos.arena-game]
-tags = ["rust", "no-rust-ci"]
+tags = ["rust", "no-rust-ci", "conventional-commits"]
 
 [repos.t-lang]
-tags = ["rust", "security"]
+tags = ["rust", "security", "conventional-commits"]
 
 [repos.nvim]
-tags = ["security"]
+tags = ["security", "conventional-commits"]
 
 [repos.cfg]
-tags = ["security"]
+tags = ["security", "conventional-commits"]

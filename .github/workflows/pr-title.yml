@@ -1,6 +1,7 @@
 name: PR title
 
-# Runs here first; other repos can opt in through workflow_call later.
+# Repos call this from pr.yml. Keep forge's original direct trigger during
+# the transition from its standalone required check to the reusable one.
 on:
   pull_request:
     types: [opened, edited, synchronize, reopened]
@@ -36,5 +37,6 @@ jobs:
               print("::error::Use a Conventional Commit PR title, e.g. "
                     "'feat: add stale reporting', 'fix(stale): include the boundary day', "
                     "or 'feat(cli)!: rename apply'. "
-                    f"Allowed types: {types.replace('|', ', ')}. See CONTRIBUTING.md.")
+                    f"Allowed types: {types.replace('|', ', ')}. "
+                    "See https://github.com/lkurcak/forge/blob/main/CONTRIBUTING.md.")
               sys.exit(1)

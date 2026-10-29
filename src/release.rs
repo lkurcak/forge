@@ -169,13 +169,14 @@ fn homebrew(
     if urls.peek().is_some() && urls.all(|url| url.contains(version)) {
         return Ok(());
     }
-    let title = format!("{name} {version}");
+    let title = format!("chore({name}): update to {version}");
+    let legacy_title = format!("{name} {version}");
     let pr = gh
         .get(&format!("repos/{tap}/pulls?state=open&per_page=100"))?
         .as_array()
         .into_iter()
         .flatten()
-        .find(|pr| pr["title"] == title.as_str())
+        .find(|pr| pr["title"] == title.as_str() || pr["title"] == legacy_title.as_str())
         .and_then(|pr| pr["number"].as_u64());
     match pr {
         Some(n) => findings

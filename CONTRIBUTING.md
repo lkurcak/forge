@@ -26,5 +26,8 @@ description becomes its body. Intermediate commit messages and branch names
 are unrestricted. Check the final squash message when merging.
 
 The PR title check runs on new PRs, title edits, new commits, and reopened
-PRs. This policy starts with forge; other managed repos are unchanged.
-Releases and version bumps remain manual for now.
+PRs. The `conventional-commits` tag applies this policy to every tracked repo.
+Automated PRs follow the same convention; Dependabot uses a `chore` prefix,
+and formula updates use titles such as `chore(tend): update to 1.2.3`.
+Existing PRs may need retitling when the check is introduced. Releases and
+version bumps remain manual for now.
