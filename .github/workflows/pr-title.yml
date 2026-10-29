@@ -1,10 +1,7 @@
 name: PR title
 
-# Repos call this from pr.yml. Keep forge's original direct trigger during
-# the transition from its standalone required check to the reusable one.
+# Repos call this from pr.yml, including forge itself.
 on:
-  pull_request:
-    types: [opened, edited, synchronize, reopened]
   workflow_call:
 
 permissions: {}
