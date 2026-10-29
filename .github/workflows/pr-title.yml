@@ -1,0 +1,40 @@
+name: PR title
+
+# Runs here first; other repos can opt in through workflow_call later.
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+  workflow_call:
+
+permissions: {}
+
+concurrency:
+  group: pr-title-${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: PR title
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Check Conventional Commit title
+        shell: python
+        run: |
+          import json
+          import os
+          import re
+          import sys
+
+          # Read the payload as data: PR titles must never become shell code.
+          with open(os.environ["GITHUB_EVENT_PATH"], encoding="utf-8") as event_file:
+              title = json.load(event_file)["pull_request"]["title"]
+
+          types = "feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert"
+          pattern = rf"({types})(\([^\s()]+\))?!?: \S[^\r\n]*"
+          if not re.fullmatch(pattern, title):
+              print("::error::Use a Conventional Commit PR title, e.g. "
+                    "'feat: add stale reporting', 'fix(stale): include the boundary day', "
+                    "or 'feat(cli)!: rename apply'. "
+                    f"Allowed types: {types.replace('|', ', ')}. See CONTRIBUTING.md.")
+              sys.exit(1)

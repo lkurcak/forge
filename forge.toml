@@ -51,6 +51,7 @@ ignore_labels = ["enhancement"]
 # without the .json extension.
 #   protect-default-branch  no deleting or force-pushing the default branch
 #   require-pr              changes to the default branch must go through a PR
+#   require-pr-title        the PR title check must pass (forge pilot only)
 #   protect-release-tags    no deleting or moving v* tags
 # Tags can add rulesets too, with `rulesets = [...]` in their table.
 # Private repos are skipped: rulesets there need GitHub Pro.
@@ -65,7 +66,7 @@ squash_merge_commit_title = "PR_TITLE"
 squash_merge_commit_message = "PR_BODY"
 delete_branch_on_merge = true
 allow_update_branch = true
-# Nothing has required checks for auto-merge to wait on.
+# Auto-merge stays off; required checks are opt-in per repo.
 allow_auto_merge = false
 # Docs live in READMEs and work is tracked elsewhere.
 has_wiki = false
@@ -219,6 +220,8 @@ releases = false
 
 [repos.forge]
 tags = ["rust", "security"]
+# Merge pr-title.yml before applying: the required check must exist first.
+rulesets = ["require-pr", "require-pr-title"]
 
 # Active
 

@@ -64,6 +64,12 @@ It only lists them.
 Only keys present in the manifest are checked, so the live state can carry
 anything else without counting as drift.
 
+Contributing to forge? See [CONTRIBUTING.md](CONTRIBUTING.md) for the PR title
+convention. The [PR title workflow](.github/workflows/pr-title.yml) runs here
+and can be called by other repos later; this pilot does not change their policy.
+Merge the workflow before running `forge apply forge` to enable the required
+check on forge's default branch.
+
 ## Credentials
 
 forge calls the API through `gh`, using the token gh holds for the manifest's
