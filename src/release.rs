@@ -51,6 +51,13 @@ pub fn check(gh: &Gh, owner: &str, repo: &Repo, needs: &Needs) -> Result<Finding
         }
     }
 
+    // HEAD is the default branch. A tag ahead of it, like one pushed before
+    // its PR was squash merged, points at a commit the branch doesn't have.
+    let compare = gh.get(&format!("{base}/compare/HEAD...{tag}?per_page=1"))?;
+    if matches!(compare["status"].as_str(), Some("ahead" | "diverged")) {
+        problems.push(format!("release {tag}: tag isn't on the default branch"));
+    }
+
     let assets: Vec<&str> = release["assets"]
         .as_array()
         .into_iter()
