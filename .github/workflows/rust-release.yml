@@ -87,6 +87,18 @@ jobs:
       bin: ${{ steps.bin.outputs.bin }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      # A tag pushed from a PR branch before its squash merge points at a
+      # commit main never gets, even when the files are the same.
+      - name: Check the tag is on the default branch
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          if ! git merge-base --is-ancestor HEAD "origin/$DEFAULT_BRANCH"; then
+            echo "::error::Tag $GITHUB_REF_NAME points at a commit that isn't on $DEFAULT_BRANCH: tag the merged commit instead"
+            exit 1
+          fi
       - uses: dtolnay/rust-toolchain@stable
       # Every crate that gets published shares the version (all of them, if
       # none is published).
