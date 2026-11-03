@@ -239,6 +239,10 @@ tags = ["rust", "security", "conventional-commits"]
 [repos.entropy-lab]
 tags = ["rust", "conventional-commits"]
 
+# eShop deal alerts; ships a container from the shared CI.
+[repos.scraper]
+tags = ["rust", "conventional-commits"]
+
 # Compose and config for the home server; its only Rust is the moojctl tool
 # in a subdirectory, released by its own workflow under tags naming the tool.
 [repos.home-server]
