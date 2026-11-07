@@ -47,6 +47,7 @@ ignore_labels = ["enhancement"]
 "release.yml" = "lkurcak/forge/.github/workflows/rust-release.yml@v1"
 "ci.yml" = "lkurcak/forge/.github/workflows/rust-ci.yml@v1"
 "pr.yml" = "lkurcak/forge/.github/workflows/pr-title.yml@v1"
+"t.yml" = "lkurcak/forge/.github/workflows/t-ci.yml@v1"
 
 # Rulesets are opt-in per repo: `rulesets = [...]` names files in rulesets/,
 # without the .json extension.
@@ -134,6 +135,12 @@ calls = ["rust-ci"]
 [tags.rust.lints.clippy]
 # Modules as foo.rs next to foo/, never foo/mod.rs.
 mod_module_files = "warn"
+
+# Repos written in T (lkurcak/t-lang) run the shared T CI from their t.yml,
+# with the `t` release they pin. forge only reports a repo that doesn't call
+# it; the fix is a commit to the repo.
+[tags.t]
+calls = ["t-ci"]
 
 # Release tags can't be moved or deleted once pushed, so a published version
 # always points at the commit it was built from.
@@ -261,6 +268,20 @@ tags = ["rust", "no-rust-ci", "conventional-commits"]
 
 [repos.t-lang]
 tags = ["rust", "security", "conventional-commits"]
+
+# Written in T, and depending on it: each pins a `t` release in its t.yml.
+[repos.tcalc]
+tags = ["t", "security", "conventional-commits"]
+
+[repos.t-libs]
+tags = ["t", "security", "conventional-commits"]
+
+[repos.t-nonograms]
+tags = ["t", "security", "conventional-commits"]
+
+# T's Neovim plugin: Lua, with no CI of its own yet.
+[repos."t-lang.nvim"]
+tags = ["security", "conventional-commits"]
 
 [repos.nvim]
 tags = ["security", "conventional-commits"]

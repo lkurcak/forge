@@ -1,0 +1,82 @@
+name: T CI
+
+# The checks shared by every repo written in T (https://github.com/lkurcak/t-lang).
+# Each repo calls it from its t.yml; triggers can't be shared, so they live
+# there:
+#
+#   on:
+#     pull_request:
+#     push:
+#       branches: [main]
+#     workflow_dispatch:
+#   permissions:
+#     contents: read
+#   jobs:
+#     ci:
+#       uses: lkurcak/forge/.github/workflows/t-ci.yml@v1
+#       with:
+#         # Bump both together, from the release's asset digest:
+#         # gh release view vX.Y.Z -R lkurcak/t-lang --json assets
+#         t-version: v0.65.0
+#         t-sha256: <sha256 of t-lang-v0.65.0-x86_64-unknown-linux-gnu.tar.gz>
+#
+# The repo pins the `t` it's checked with, by version and by the sha256 of
+# the release archive, so a release whose archive changed fails here instead
+# of running something else. Then it runs `run`, the repo's own script, which
+# says what checking it means: typically `t check --deny-warnings`, `t fmt
+# --check`, `t test`, and the program's output against what's expected.
+
+on:
+  workflow_call:
+    inputs:
+      t-version:
+        description: The t-lang release to check with, like v0.65.0.
+        type: string
+        required: true
+      t-sha256:
+        description: >-
+          The sha256 of that release's x86_64-unknown-linux-gnu archive, from
+          its asset digest.
+        type: string
+        required: true
+      run:
+        description: The command that checks the repo, run from its root.
+        type: string
+        default: tests/run.sh
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Install t
+        env:
+          T_VERSION: ${{ inputs.t-version }}
+          T_SHA256: ${{ inputs.t-sha256 }}
+        run: |
+          # The inputs are data, never shell code: check their shape first.
+          [[ "$T_VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "t-version: not vX.Y.Z: $T_VERSION"; exit 1; }
+          [[ "$T_SHA256" =~ ^[0-9a-f]{64}$ ]] || { echo "t-sha256: not 64 lowercase hex digits"; exit 1; }
+          name="t-lang-${T_VERSION}-x86_64-unknown-linux-gnu"
+          curl -fsSL -o t.tar.gz \
+            "https://github.com/lkurcak/t-lang/releases/download/${T_VERSION}/${name}.tar.gz"
+          echo "${T_SHA256}  t.tar.gz" | sha256sum -c -
+          mkdir -p "$HOME/.local/bin"
+          tar xzf t.tar.gz
+          mv "${name}/t" "$HOME/.local/bin/t"
+          rm -r t.tar.gz "${name}"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - run: t --version
+      - name: Check
+        env:
+          RUN: ${{ inputs.run }}
+        run: bash -c "$RUN"

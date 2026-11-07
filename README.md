@@ -54,6 +54,11 @@ forge stale           # open issues and PRs nobody has touched in 90 days
   secrets, and calling the workflow at all brings the `rust-release` tag.
   Homebrew can't reach a private repo, so from one `homebrew` ships the
   `binaries` archives through a `{repo}-dist-vX.Y.Z` release on the tap.
+- Repos written in [T](https://github.com/lkurcak/t-lang) carry the `t` tag
+  and call [`t-ci.yml`](.github/workflows/t-ci.yml) from their own
+  `.github/workflows/t.yml` (`ci.yml` is Rust's). They pass the `t` release
+  they're checked with, `t-version` and the `t-sha256` of its Linux archive,
+  and optionally `run`, the command that checks them (`tests/run.sh`).
 - The latest GitHub release is checked too: its tag must look like
   `release_tag_prefix` + `X.Y.Z`, it must have a
   `{repo}-vX.Y.Z-{target}.tar.gz` (`.zip` on Windows) for each target the
