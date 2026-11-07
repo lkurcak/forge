@@ -250,6 +250,10 @@ tags = ["rust", "conventional-commits"]
 [repos.scraper]
 tags = ["rust", "conventional-commits"]
 
+# Japanese study site; ships a container from the shared CI.
+[repos.jp]
+tags = ["rust", "conventional-commits"]
+
 # Compose and config for the home server; its only Rust is the moojctl tool
 # in a subdirectory, released by its own workflow under tags naming the tool.
 [repos.home-server]
