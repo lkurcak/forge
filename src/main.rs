@@ -2,6 +2,7 @@ mod cargo;
 mod days;
 mod dependabot;
 mod diff;
+mod docker;
 mod gh;
 mod manifest;
 mod progress;

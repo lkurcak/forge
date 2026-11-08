@@ -71,6 +71,9 @@ struct RawTag {
     /// Lints every package's `[lints]` must set, at least this strictly.
     #[serde(default)]
     lints: Lints,
+    /// Commands some `RUN` instruction of the root Dockerfile must run.
+    #[serde(default)]
+    dockerfile_runs: Vec<String>,
 }
 
 /// A deployment environment a tag needs.
@@ -153,6 +156,7 @@ struct Tag {
     settings: Map<String, Value>,
     needs_public: bool,
     lints: Lints,
+    dockerfile_runs: Vec<String>,
 }
 
 /// What a repository needs, from its manifest tags plus the tags its calls
@@ -181,6 +185,8 @@ pub struct Needs {
     pub release_targets: Vec<String>,
     /// Lints every package's `[lints]` must set, at least this strictly.
     pub lints: Lints,
+    /// Commands some `RUN` instruction of the root Dockerfile must run.
+    pub dockerfile_runs: Vec<String>,
 }
 
 #[derive(Clone)]
@@ -264,6 +270,7 @@ impl Manifest {
                     settings: tag.settings,
                     needs_public: tag.needs_public,
                     lints: tag.lints,
+                    dockerfile_runs: tag.dockerfile_runs,
                 };
                 Ok((name, tag))
             })
@@ -337,6 +344,7 @@ impl Manifest {
             needs.secrets.extend(tag.secrets.clone());
             push_new(&mut needs.forbidden_secrets, &tag.forbidden_secrets);
             push_new(&mut needs.calls, &tag.calls);
+            push_new(&mut needs.dockerfile_runs, &tag.dockerfile_runs);
             needs.settings.extend(tag.settings.clone());
             for (name, environment) in &tag.environments {
                 let needed = needs.environments.entry(name.clone()).or_default();
