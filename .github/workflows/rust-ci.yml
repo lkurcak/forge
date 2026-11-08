@@ -46,6 +46,37 @@ name: Rust CI
 # The container jobs take whatever the caller grants, so callers without
 # containers don't have to grant packages: write; every other job keeps
 # contents: read for itself.
+#
+# Image layers are cached between runs, so the Dockerfile compiles the
+# dependencies in a layer of their own with cargo-chef (forge's `container`
+# tag checks for it). That layer only rebuilds when Cargo.toml, Cargo.lock or
+# the toolchain changes; a source change only recompiles the crate:
+#
+#   FROM rust:1-bookworm AS chef
+#   RUN cargo install cargo-chef --locked
+#   WORKDIR /build
+#   # With a rust-toolchain.toml; without one, leave out these two lines.
+#   COPY rust-toolchain.toml ./
+#   RUN rustup toolchain install
+#
+#   FROM chef AS planner
+#   COPY . .
+#   RUN cargo chef prepare --recipe-path recipe.json
+#
+#   FROM chef AS builder
+#   COPY --from=planner /build/recipe.json ./
+#   RUN cargo chef cook --locked --release --recipe-path recipe.json
+#   COPY Cargo.toml Cargo.lock ./
+#   COPY src ./src
+#   RUN cargo build --locked --release
+#
+#   FROM debian:bookworm-slim
+#   COPY --from=builder /build/target/release/{binary} /usr/local/bin/
+#   ...
+#
+# The planner copies the whole context, so .dockerignore should leave out
+# target and .git. A pinned toolchain (a dated nightly, say) keeps the cache
+# warm; `nightly` alone rebuilds everything daily.
 
 on:
   workflow_call:

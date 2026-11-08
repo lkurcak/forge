@@ -142,6 +142,15 @@ mod_module_files = "warn"
 [tags.t]
 calls = ["t-ci"]
 
+# Repos shipping a container image (rust-ci's `container` input, or this tag
+# on a repo building one with its own workflow) compile their dependencies in
+# a Docker layer of their own with cargo-chef. CI's build cache keeps that
+# layer until Cargo.toml, Cargo.lock or the toolchain changes; without it,
+# every push rebuilds every dependency. forge only reports a Dockerfile that
+# doesn't; the fix is a commit to the repo, like rust-ci.yml's example.
+[tags.container]
+dockerfile_runs = ["cargo chef cook"]
+
 # Release tags can't be moved or deleted once pushed, so a published version
 # always points at the commit it was built from.
 [tags.rust-release]
@@ -266,9 +275,11 @@ tags = ["rust", "no-rust-ci", "conventional-commits"]
 [repos.magicube-solver]
 tags = ["rust", "security", "conventional-commits"]
 
-# A Bevy game on nightly; building it on every push isn't worth the minutes.
+# A Bevy game on nightly. Its own server.yml tests the game and ships the
+# dedicated server's image; the client needs a private path dependency, so CI
+# leaves it out.
 [repos.arena-game]
-tags = ["rust", "no-rust-ci", "conventional-commits"]
+tags = ["rust", "no-rust-ci", "container", "conventional-commits"]
 
 [repos.t-lang]
 tags = ["rust", "security", "conventional-commits"]

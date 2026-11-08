@@ -44,6 +44,11 @@ forge stale           # open issues and PRs nobody has touched in 90 days
 - `[tags.<name>.lints]` lists lints each Cargo package must set (or inherit
   from `[workspace.lints]`), in Cargo's `[lints]` shape. Missing ones are only
   reported, since fixing them means committing to the repo.
+- `[tags.<name>] dockerfile_runs = [...]` lists commands some `RUN` of the
+  root Dockerfile must run, also only reported. The `container` tag, which
+  rust-ci's `container` input brings, asks for `cargo chef cook`: dependencies
+  built in a cached layer of their own (see the example in
+  [`rust-ci.yml`](.github/workflows/rust-ci.yml)).
 - Rust repos share their CI and release workflows,
   [`rust-ci.yml`](.github/workflows/rust-ci.yml) and
   [`rust-release.yml`](.github/workflows/rust-release.yml), calling them from

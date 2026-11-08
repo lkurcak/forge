@@ -117,15 +117,7 @@ pub fn reconcile(gh: &Gh, manifest: &Manifest, repo: &Repo, mode: Mode) -> Outco
         outcome.record(result);
     }
 
-    if !needs.lints.is_empty() {
-        match Workspace::read(gh, &format!("{owner}/{}", repo.name)) {
-            Ok(Some(workspace)) => outcome.manual.extend(workspace.lint_problems(&needs.lints)),
-            Ok(None) => outcome
-                .skipped
-                .push("lints (no Cargo.toml at the root)".into()),
-            Err(err) => outcome.errors.push(format!("{err:#}")),
-        }
-    }
+    files_drift(gh, &format!("{owner}/{}", repo.name), &needs, &mut outcome);
 
     if repo.release_tag_prefix.is_some() {
         match crate::release::check(gh, owner, repo, &needs) {
@@ -153,6 +145,30 @@ impl Outcome {
         match result {
             Ok(drift) => self.drift.extend(drift),
             Err(err) => self.errors.push(format!("{err:#}")),
+        }
+    }
+}
+
+/// What the default branch's files lack: lints in the Cargo manifests, and
+/// commands in the Dockerfile. Only reported, since the fix is a commit.
+fn files_drift(gh: &Gh, repo: &str, needs: &Needs, outcome: &mut Outcome) {
+    if !needs.lints.is_empty() {
+        match Workspace::read(gh, repo) {
+            Ok(Some(workspace)) => outcome.manual.extend(workspace.lint_problems(&needs.lints)),
+            Ok(None) => outcome
+                .skipped
+                .push("lints (no Cargo.toml at the root)".into()),
+            Err(err) => outcome.errors.push(format!("{err:#}")),
+        }
+    }
+
+    if !needs.dockerfile_runs.is_empty() {
+        match crate::docker::missing_runs(gh, repo, &needs.dockerfile_runs) {
+            Ok(Some(problems)) => outcome.manual.extend(problems),
+            Ok(None) => outcome
+                .manual
+                .push("Dockerfile: missing at the root".into()),
+            Err(err) => outcome.errors.push(format!("{err:#}")),
         }
     }
 }
