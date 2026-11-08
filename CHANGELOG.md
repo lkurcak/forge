@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-11-08
+
+### Fixed
+
+- Organizations' repositories can be managed: when gh isn't signed in as the
+  manifest's `owner`, forge uses the active gh account instead of failing.
+
 ## [0.1.0] - 2026-11-08
 
 ### Added
@@ -20,5 +27,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Prebuilt binaries for Windows, macOS and Linux are attached to each
   [GitHub release](https://github.com/lkurcak/forge/releases).
 
-[Unreleased]: https://github.com/lkurcak/forge/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/lkurcak/forge/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/lkurcak/forge/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/lkurcak/forge/releases/tag/v0.1.0
