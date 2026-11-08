@@ -171,7 +171,9 @@ Each file's header shows how to call it, and its inputs say what they do.
 
 forge uses the token gh holds for the manifest's `owner`
 (`gh auth token --user OWNER`), so the active gh account doesn't matter.
-`GH_TOKEN` overrides it.
+When gh isn't signed in as the owner, as for an organization, it uses the
+active account's token instead, which needs admin access to the owner's
+repos. `GH_TOKEN` overrides both.
 
 ## Contributing
 

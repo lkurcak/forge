@@ -18,27 +18,31 @@ pub struct Gh {
 }
 
 impl Gh {
-    /// Uses `GH_TOKEN` if set, otherwise the token gh holds for `user`.
+    /// Uses `GH_TOKEN` if set, otherwise the token gh holds for `owner`,
+    /// otherwise (for an organization, say) the active gh account's.
     ///
-    /// Asking for a specific account means forge works even when the active
-    /// gh account is a different one.
-    pub fn new(user: &str) -> Result<Self> {
+    /// Asking for the owner's account first means forge works even when the
+    /// active gh account is a different one.
+    pub fn new(owner: &str) -> Result<Self> {
         if let Ok(token) = std::env::var("GH_TOKEN") {
             return Ok(Self { token });
         }
-        let out = Command::new("gh")
-            .args(["auth", "token", "--hostname", "github.com", "--user", user])
-            .output()
-            .context("running gh")?;
-        if !out.status.success() {
-            bail!(
-                "gh has no credentials for {user}; run `gh auth login` and sign in as {user}\n{}",
-                String::from_utf8_lossy(&out.stderr).trim()
-            );
+        let token = |user: Option<&str>| -> Result<Option<String>> {
+            let mut cmd = Command::new("gh");
+            cmd.args(["auth", "token", "--hostname", "github.com"]);
+            if let Some(user) = user {
+                cmd.args(["--user", user]);
+            }
+            let out = cmd.output().context("running gh")?;
+            Ok(out
+                .status
+                .success()
+                .then(|| String::from_utf8_lossy(&out.stdout).trim().to_owned()))
+        };
+        match token(Some(owner))?.or(token(None)?) {
+            Some(token) => Ok(Self { token }),
+            None => bail!("gh isn't signed in; run `gh auth login`"),
         }
-        Ok(Self {
-            token: String::from_utf8(out.stdout)?.trim().to_owned(),
-        })
     }
 
     pub fn get(&self, path: &str) -> Result<Value> {
