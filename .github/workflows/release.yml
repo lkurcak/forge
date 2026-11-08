@@ -12,4 +12,6 @@ jobs:
       id-token: write
     secrets: inherit
     with:
+      crates-io: true
       binaries: true
+      homebrew: true
