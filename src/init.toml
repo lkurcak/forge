@@ -1,0 +1,71 @@
+# The repositories forge manages, and what they should look like. `forge
+# check` reports where they differ; `forge apply` fixes what it can and lists
+# the rest. Only keys written here are checked, so anything else is left as
+# it is. Every key is described in https://github.com/lkurcak/forge#manifest.
+
+owner = "@OWNER@"
+
+# The latest GitHub release of each repo must be tagged vX.Y.Z and have
+# reached what its release workflow ships to. Repos without releases are
+# left alone.
+release_tag_prefix = "v"
+
+# Repo settings, as in PATCH /repos/{owner}/{repo}. These make PRs
+# squash-only, with the PR's title and description as the commit message.
+[settings]
+allow_squash_merge = true
+allow_merge_commit = false
+allow_rebase_merge = false
+squash_merge_commit_title = "PR_TITLE"
+squash_merge_commit_message = "PR_BODY"
+delete_branch_on_merge = true
+
+# Shared workflows, keyed by the file in .github/workflows/ a repo calls them
+# from. forge reads each at the ref given, checks every caller uses that ref,
+# and treats each input a caller turns on as a tag of that repo.
+[workflows]
+"ci.yml" = "lkurcak/forge/.github/workflows/rust-ci.yml@v1"
+"release.yml" = "lkurcak/forge/.github/workflows/rust-release.yml@v1"
+"pr.yml" = "lkurcak/forge/.github/workflows/pr-title.yml@v1"
+
+# A repo's tags bring the requirements listed under them. Calling a shared
+# workflow tags a repo too: with the workflow's name (rust-ci, rust-release)
+# and with each input it turns on (container, crates-io, homebrew, ...).
+
+# Rust repos run the shared CI. A repo it doesn't suit declines it with the
+# no-rust-ci tag.
+[tags.rust]
+calls = ["rust-ci"]
+
+# Secret scanning, and Dependabot PRs for vulnerable dependencies. Free only
+# on public repos, so each public repo either carries the tag or declines it
+# with no-security.
+[tags.security]
+needs_public = true
+
+[tags.security.settings.security_and_analysis]
+secret_scanning = { status = "enabled" }
+secret_scanning_push_protection = { status = "enabled" }
+dependabot_security_updates = { status = "enabled" }
+
+# PR titles follow Conventional Commits, checked by the shared pr-title
+# workflow, and changes to the default branch go through PRs.
+[tags.conventional-commits]
+calls = ["pr-title"]
+rulesets = ["require-pr", "require-pr-title"]
+
+# Published versions can't move: release tags can't be moved or deleted, and
+# only they may deploy to the release environment (crates.io's trusted
+# publisher is configured for it).
+[tags.rust-release]
+rulesets = ["protect-release-tags"]
+
+[tags.rust-release.environments.release]
+deploy_tags = ["v*"]
+
+# Container images compile their dependencies in a cached layer of their own.
+[tags.container]
+dockerfile_runs = ["cargo chef cook"]
+
+# Every repository @OWNER@ owns, apart from forks and archived ones, tagged by
+# language and visibility. Remove the ones forge shouldn't manage.

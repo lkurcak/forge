@@ -44,7 +44,9 @@ on:
         default: false
       homebrew:
         description: >-
-          Open a PR bumping Formula/{repo}.rb in lkurcak/homebrew-tap. From a
+          Open a PR bumping Formula/{repo}.rb in {owner}/homebrew-tap,
+          through a GitHub App installed there (the TAP_APP_ID variable and
+          TAP_APP_PRIVATE_KEY secret). From a
           public repo the formula builds the tag's source. Homebrew can't
           download a private repo's source or releases, so from one it installs
           the binaries archives instead (set binaries too), which go to a
@@ -54,10 +56,10 @@ on:
         default: false
       winget:
         description: >-
-          Build WINGET_TARGETS and submit lkurcak.{repo} to winget-pkgs from
-          them. The first version has to be submitted with forge's
-          scripts/winget-new.sh, since the action only updates existing
-          packages.
+          Build WINGET_TARGETS and submit {owner}.{repo} to winget-pkgs from
+          them, with a classic token in the WINGET_PAT secret. The first
+          version has to be submitted with forge's scripts/winget-new.sh,
+          since the action only updates existing packages.
         type: boolean
         default: false
 
@@ -271,7 +273,7 @@ jobs:
     permissions:
       contents: read
     env:
-      TAP: lkurcak/homebrew-tap
+      TAP: ${{ github.repository_owner }}/homebrew-tap
       VERSION: ${{ needs.verify.outputs.version }}
       PRIVATE: ${{ github.event.repository.private }}
     steps:
@@ -371,16 +373,18 @@ jobs:
         id: exists
         env:
           GH_TOKEN: ${{ github.token }}
+          OWNER: ${{ github.repository_owner }}
         run: |
-          if gh api "repos/microsoft/winget-pkgs/contents/manifests/l/lkurcak/${REPO}" --silent; then
+          initial=${OWNER:0:1}
+          if gh api "repos/microsoft/winget-pkgs/contents/manifests/${initial,,}/${OWNER}/${REPO}" --silent; then
             echo "exists=true" >> "$GITHUB_OUTPUT"
           else
-            echo "::warning::lkurcak.${REPO} isn't in winget-pkgs yet; submit the first version with komac new"
+            echo "::warning::${OWNER}.${REPO} isn't in winget-pkgs yet; submit the first version with forge's scripts/winget-new.sh"
           fi
       - if: steps.exists.outputs.exists == 'true'
         uses: vedantmgoyal9/winget-releaser@v2
         with:
-          identifier: lkurcak.${{ github.event.repository.name }}
+          identifier: ${{ github.repository_owner }}.${{ github.event.repository.name }}
           version: ${{ needs.verify.outputs.version }}
           installers-regex: -pc-windows-msvc\.zip$
           release-tag: ${{ github.ref_name }}

@@ -7,7 +7,6 @@
 //! against the shared workflow itself.
 
 use std::collections::BTreeMap;
-use std::fs;
 use std::path::Path;
 
 use anyhow::{Context, Result, bail};
@@ -57,31 +56,69 @@ impl Call {
     }
 }
 
-impl SharedWorkflow {
-    /// Reads the workflow `uses` names from the repo `dir` holds, which must
-    /// be the one it lives in. Repos call it from `.github/workflows/{caller}`.
-    pub fn load(dir: &Path, caller: &str, uses: &str) -> Result<Self> {
+/// Where a shared workflow lives, from the `uses:` reference callers write,
+/// like `owner/repo/.github/workflows/file.yml@v1`.
+pub struct Reference {
+    /// `owner/repo`.
+    pub repo: String,
+    /// The file's path in that repo.
+    pub file: String,
+    pub git_ref: String,
+}
+
+impl Reference {
+    pub fn parse(uses: &str) -> Result<Self> {
         let (path, git_ref) = uses
             .split_once('@')
             .with_context(|| format!("workflow {uses} needs an @ref"))?;
-        let local = path
-            .splitn(3, '/')
-            .nth(2)
-            .with_context(|| format!("workflow {uses} isn't owner/repo/path@ref"))?;
-        let file = dir.join(local);
-        let text =
-            fs::read_to_string(&file).with_context(|| format!("reading {}", file.display()))?;
-        let yaml: Value = serde_yaml_ng::from_str(&text)
-            .with_context(|| format!("parsing {}", file.display()))?;
+        let mut parts = path.splitn(3, '/');
+        match (parts.next(), parts.next(), parts.next()) {
+            (Some(owner), Some(repo), Some(file)) if !owner.is_empty() && !repo.is_empty() => {
+                Ok(Self {
+                    repo: format!("{owner}/{repo}"),
+                    file: file.to_owned(),
+                    git_ref: git_ref.to_owned(),
+                })
+            }
+            _ => bail!("workflow {uses} isn't owner/repo/path@ref"),
+        }
+    }
+
+    /// The file's stem, which names the workflow.
+    pub fn name(&self) -> &str {
+        Path::new(&self.file)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or(&self.file)
+    }
+}
+
+impl SharedWorkflow {
+    /// Reads the workflow `uses` names from GitHub, at the ref callers use.
+    /// Repos call it from `.github/workflows/{caller}`.
+    pub fn fetch(gh: &Gh, caller: &str, uses: &str) -> Result<Self> {
+        let reference = Reference::parse(uses)?;
+        let text = gh
+            .file(&reference.repo, &reference.file, Some(&reference.git_ref))?
+            .with_context(|| format!("{uses} doesn't exist"))?;
+        Self::parse(caller, uses, &text)
+    }
+
+    /// Reads the workflow `uses` names from its text.
+    pub fn parse(caller: &str, uses: &str, text: &str) -> Result<Self> {
+        let reference = Reference::parse(uses)?;
+        let path = uses.split_once('@').map_or(uses, |(path, _)| path);
+        let yaml: Value =
+            serde_yaml_ng::from_str(text).with_context(|| format!("parsing {uses}"))?;
 
         let workflow_call = yaml["on"]
             .get("workflow_call")
-            .with_context(|| format!("{} has no workflow_call trigger", file.display()))?;
+            .with_context(|| format!("{uses} has no workflow_call trigger"))?;
         let inputs = match workflow_call.get("inputs") {
             None => Vec::new(),
             Some(inputs) => inputs
                 .as_object()
-                .with_context(|| format!("{} has invalid workflow_call inputs", file.display()))?
+                .with_context(|| format!("{uses} has invalid workflow_call inputs"))?
                 .keys()
                 .cloned()
                 .collect(),
@@ -98,14 +135,10 @@ impl SharedWorkflow {
             .collect();
 
         Ok(Self {
-            name: Path::new(local)
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .unwrap_or(local)
-                .to_owned(),
+            name: reference.name().to_owned(),
             caller: format!(".github/workflows/{caller}"),
             path: path.to_owned(),
-            git_ref: git_ref.to_owned(),
+            git_ref: reference.git_ref,
             inputs,
             targets,
         })
@@ -189,13 +222,20 @@ impl SharedWorkflow {
     }
 }
 
+/// One of this repo's own shared workflows, read from disk rather than GitHub.
+#[cfg(test)]
+pub fn local(caller: &str, uses: &str) -> Result<SharedWorkflow> {
+    let reference = Reference::parse(uses)?;
+    let file = Path::new(env!("CARGO_MANIFEST_DIR")).join(&reference.file);
+    SharedWorkflow::parse(caller, uses, &std::fs::read_to_string(file)?)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn shared() -> SharedWorkflow {
-        SharedWorkflow::load(
-            Path::new(env!("CARGO_MANIFEST_DIR")),
+        local(
             "release.yml",
             "lkurcak/forge/.github/workflows/rust-release.yml@v1",
         )
@@ -228,12 +268,7 @@ jobs:
 
     #[test]
     fn reads_a_workflow_without_inputs() {
-        let shared = SharedWorkflow::load(
-            Path::new(env!("CARGO_MANIFEST_DIR")),
-            "pr.yml",
-            "lkurcak/forge/.github/workflows/pr-title.yml@v1",
-        )
-        .unwrap();
+        let shared = local("pr.yml", "lkurcak/forge/.github/workflows/pr-title.yml@v1").unwrap();
         let call = shared
             .parse_call(include_str!("../.github/workflows/pr.yml"))
             .unwrap()
@@ -264,6 +299,17 @@ jobs:
         let call = CALL.replace("@v1", "@main").replace("winget:", "wignet:");
         let release = shared.parse_call(&call).unwrap().unwrap();
         assert_eq!(shared.problems(&release).len(), 2);
+    }
+
+    #[test]
+    fn parses_references() {
+        let reference = Reference::parse("a/b/.github/workflows/ci.yml@v2").unwrap();
+        assert_eq!(reference.repo, "a/b");
+        assert_eq!(reference.file, ".github/workflows/ci.yml");
+        assert_eq!(reference.git_ref, "v2");
+        assert_eq!(reference.name(), "ci");
+        assert!(Reference::parse("a/b/ci.yml").is_err());
+        assert!(Reference::parse("a/ci.yml@v1").is_err());
     }
 
     #[test]

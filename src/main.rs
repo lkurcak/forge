@@ -4,6 +4,7 @@ mod dependabot;
 mod diff;
 mod docker;
 mod gh;
+mod init;
 mod manifest;
 mod progress;
 mod reconcile;
@@ -12,26 +13,29 @@ mod stale;
 mod workflow;
 
 use std::fmt::Write as _;
-use std::path::PathBuf;
+use std::fs;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread;
 
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
 
 use crate::gh::Gh;
 use crate::manifest::{Manifest, Repo};
 use crate::progress::Progress;
 use crate::reconcile::{Mode, Outcome, reconcile};
+use crate::workflow::SharedWorkflow;
 
 #[derive(Parser)]
 #[command(version, about)]
 struct Cli {
-    /// Manifest describing the managed repositories.
-    #[arg(long, global = true, default_value = "forge.toml")]
-    manifest: PathBuf,
+    /// Manifest describing the managed repositories [default: ./forge.toml,
+    /// else forge/forge.toml in the config directory, like ~/.config]
+    #[arg(long, global = true, env = "FORGE_MANIFEST")]
+    manifest: Option<PathBuf>,
 
     #[command(subcommand)]
     command: Command,
@@ -55,6 +59,15 @@ enum Command {
     },
     /// List managed repositories, and owned ones the manifest doesn't cover.
     List,
+    /// Write a starter manifest listing every repository you own.
+    ///
+    /// It goes to --manifest, or ./forge.toml. Review it, then `forge check`.
+    Init {
+        /// Account whose repositories to manage [default: the one gh is
+        /// signed in as]
+        #[arg(long)]
+        owner: Option<String>,
+    },
     /// List open issues and PRs in any owned repo that have gone quiet.
     Stale {
         /// Days without activity before one counts as quiet.
@@ -75,8 +88,15 @@ fn main() -> ExitCode {
 
 fn run() -> Result<ExitCode> {
     let cli = Cli::parse();
-    let manifest = Manifest::load(&cli.manifest)?;
+    if let Command::Init { owner } = cli.command {
+        let path = cli.manifest.unwrap_or_else(|| PathBuf::from(MANIFEST));
+        return init::run(&path, owner).map(|()| ExitCode::SUCCESS);
+    }
+
+    let path = find_manifest(cli.manifest)?;
+    let mut manifest = Manifest::load(&path)?;
     let gh = Gh::new(&manifest.owner)?;
+    manifest.fetch_workflows(|caller, uses| SharedWorkflow::fetch(&gh, caller, uses))?;
 
     match cli.command {
         Command::Check { repos } => sync(&gh, &manifest, &repos, Mode::Check),
@@ -86,7 +106,39 @@ fn run() -> Result<ExitCode> {
         } => sync(&gh, &manifest, &repos, Mode::Apply { update_secrets }),
         Command::List => list(&gh, &manifest),
         Command::Stale { days } => stale(&gh, &manifest, days),
+        Command::Init { .. } => unreachable!("handled before loading a manifest"),
     }
+}
+
+const MANIFEST: &str = "forge.toml";
+
+/// The manifest to use: the one given, else `./forge.toml`, else
+/// `forge/forge.toml` in the config directory. Symlinks are resolved, so
+/// custom rulesets are found next to the real file.
+fn find_manifest(given: Option<PathBuf>) -> Result<PathBuf> {
+    let path = if let Some(path) = given {
+        path
+    } else {
+        let config = config_dir().map(|dir| dir.join("forge").join(MANIFEST));
+        match config {
+            _ if Path::new(MANIFEST).exists() => PathBuf::from(MANIFEST),
+            Some(config) if config.exists() => config,
+            config => bail!(
+                "no {MANIFEST} here{}; write one with `forge init`, or pass --manifest",
+                config.map_or_else(String::new, |c| format!(" or at {}", c.display()))
+            ),
+        }
+    };
+    fs::canonicalize(&path).with_context(|| format!("reading {}", path.display()))
+}
+
+/// `$XDG_CONFIG_HOME`, else `~/.config`, else (on Windows) `%APPDATA%`.
+fn config_dir() -> Option<PathBuf> {
+    let var = |name| std::env::var_os(name).filter(|v| !v.is_empty());
+    var("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .or_else(|| var("HOME").map(|home| Path::new(&home).join(".config")))
+        .or_else(|| var("APPDATA").map(PathBuf::from))
 }
 
 /// How many repositories to work on at once.

@@ -5,6 +5,13 @@ use std::process::{Command, Stdio};
 use anyhow::{Context, Result, bail};
 use serde_json::Value;
 
+/// A repository, as `forge init` sees it.
+pub struct RepoSummary {
+    pub name: String,
+    pub public: bool,
+    pub language: Option<String>,
+}
+
 /// Calls the GitHub API through the `gh` CLI, as a specific account.
 pub struct Gh {
     token: String,
@@ -111,6 +118,54 @@ impl Gh {
             );
         }
         Ok(())
+    }
+
+    /// The account gh is signed in as.
+    pub fn active_user() -> Result<String> {
+        let out = Command::new("gh")
+            .args(["api", "user", "--jq", ".login"])
+            .output()
+            .context("running gh")?;
+        if !out.status.success() {
+            bail!(
+                "gh isn't signed in; run `gh auth login`\n{}",
+                String::from_utf8_lossy(&out.stderr).trim()
+            );
+        }
+        Ok(String::from_utf8(out.stdout)?.trim().to_owned())
+    }
+
+    /// Non-fork, non-archived repositories owned by `owner`, with whether
+    /// each is public and its main language.
+    pub fn source_repo_summaries(&self, owner: &str) -> Result<Vec<RepoSummary>> {
+        let out = Command::new("gh")
+            .args(["repo", "list", owner, "--source", "--no-archived"])
+            .args([
+                "--limit",
+                "1000",
+                "--json",
+                "name,visibility,primaryLanguage",
+            ])
+            .env("GH_TOKEN", &self.token)
+            .output()
+            .context("running gh")?;
+        if !out.status.success() {
+            bail!(
+                "listing repos: {}",
+                String::from_utf8_lossy(&out.stderr).trim()
+            );
+        }
+        let repos: Vec<Value> = serde_json::from_slice(&out.stdout)?;
+        Ok(repos
+            .iter()
+            .filter_map(|repo| {
+                Some(RepoSummary {
+                    name: repo["name"].as_str()?.to_owned(),
+                    public: repo["visibility"] == "PUBLIC",
+                    language: repo["primaryLanguage"]["name"].as_str().map(str::to_owned),
+                })
+            })
+            .collect())
     }
 
     /// Non-fork, non-archived repositories owned by `owner`.

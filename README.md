@@ -1,96 +1,178 @@
 # forge
 
-Keeps my GitHub repositories in line with one manifest: merge settings,
-Actions permissions and branch rulesets.
+Keeps a GitHub account's repositories in line with one manifest. It sets what
+the API can set: repo settings, Actions permissions, rulesets, variables,
+secrets and deployment environments. It checks and reports what needs a
+commit or a person to fix: shared CI workflows, Cargo lints, Dockerfiles,
+releases that didn't reach crates.io, Homebrew or winget, and open Dependabot
+alerts.
+
+## Install
 
 ```sh
-cargo install --path .
-
-forge list            # managed repos, plus owned repos the manifest doesn't cover
-forge check [REPO…]   # report drift; exits 1 if anything differs
-forge apply [REPO…]   # fix drift
-forge stale           # open issues and PRs nobody has touched in 90 days
+cargo install forgectl            # installs the `forge` command
+brew install lkurcak/tap/forge
 ```
 
-- `forge.toml` lists the managed repos. Top-level `settings`, `actions` and
-  `rulesets` apply to all of them; a repo's own table overrides them.
+Binaries for Linux, macOS and Windows are on the
+[releases page](https://github.com/lkurcak/forge/releases). forge calls the
+API through the [GitHub CLI](https://cli.github.com/), so `gh` must be
+installed and signed in.
+
+## Getting started
+
+```sh
+forge init     # write forge.toml, listing every repo you own
+forge check    # report where repos differ from it; exits 1 if any do
+forge apply    # fix what forge can, and list the rest
+```
+
+`forge init` tags each repo by language and visibility, under a starter set
+of settings and tags. Remove repos forge shouldn't manage and adjust the rest
+before the first `forge apply`. Only keys in the manifest are checked, so
+anything it leaves out stays as it is.
+
+The manifest is the first of:
+
+1. `--manifest PATH`, or `$FORGE_MANIFEST`;
+2. `forge.toml` in the current directory;
+3. `forge/forge.toml` in the config directory: `$XDG_CONFIG_HOME`, else
+   `~/.config` (`%APPDATA%` on Windows).
+
+A repo of its own gives the manifest history and review. Symlink it into the
+config directory to run forge from anywhere.
+
+## Commands
+
+```sh
+forge check [REPO…]         # report drift; exits 1 if anything differs
+forge apply [REPO…]         # fix drift
+forge list                  # managed repos, and owned ones the manifest doesn't cover
+forge stale [--days 90]     # open issues and PRs nobody has touched in that long
+forge init [--owner NAME]   # write a starter manifest
+```
+
+`forge stale` covers every repo the owner has, managed or not, leaving out
+issues with a label in `[stale] ignore_labels` (a backlog of feature ideas,
+say). It only lists them.
+
+## Manifest
+
+```toml
+owner = "you"
+release_tag_prefix = "v"
+
+[settings]
+allow_merge_commit = false
+
+[tags.rust]
+calls = ["rust-ci"]
+
+[repos.tool]
+tags = ["rust", "security"]
+rulesets = ["protect-default-branch"]
+```
+
+- Top-level `settings`, `actions` and `rulesets` apply to every repo. A
+  repo's own table overrides them: `settings` and `actions` key by key,
+  `rulesets` wholesale.
+- `[settings]` goes to `PATCH /repos/{owner}/{repo}`, so any key that
+  endpoint takes works.
 - `[actions]` goes to `/actions/permissions` (whether Actions run and which
   actions may), `[actions.workflow]` to `/actions/permissions/workflow` (the
   `GITHUB_TOKEN`'s defaults), and `[actions.selected-actions]` to the
   allowlist, checked while `allowed_actions` is `selected`.
-- `rulesets/*.json` are ruleset bodies in the
-  [REST API shape](https://docs.github.com/en/rest/repos/rules), matched by file
-  name. Repos opt in with `rulesets = [...]`, or get them from a tag's.
-- `[tags.<name>]` adds Actions variables and secrets to every repo with that tag.
-  Secret values come from local files (e.g. `~/.config/forge/tap-app.pem`) and are
-  only set when the secret is missing, since GitHub never reveals them. Tags
-  can carry `settings` too, applied over the top-level ones and under the repo's.
-- A tag with `needs_public = true` only works on public repos. Every public
-  repo must carry it or decline it with `no-<tag>`, and a private repo
-  carrying it is reported, so making a repo public or private shows up.
-- `[tags.<name>.environments.<env>]` makes a deployment environment exist;
-  `deploy_tags = [...]` lets only those tag patterns deploy to it, and no branch.
-- A tag's `calls = [...]` names shared workflows its repos must call; one
-  that doesn't is reported, unless it carries `no-<workflow>` to decline it.
-  In apply mode, rulesets requiring status checks are deferred while a
-  required workflow is missing, so a repo isn't blocked on a check it can't run.
-- The `conventional-commits` tag requires the shared
-  [`pr-title.yml`](.github/workflows/pr-title.yml) workflow, called from the
-  repo's `.github/workflows/pr.yml`, plus PRs and a passing
-  `pr-title / PR title` check before merging. Tracked repos carry it except
-  `homebrew-tap`, which uses the check-only `pr-title` tag so its existing
-  `brew pr-pull` publisher can push bottle commits directly to main.
-  Private repos run the check too, but rulesets there still need GitHub Pro.
-- `[tags.<name>.lints]` lists lints each Cargo package must set (or inherit
-  from `[workspace.lints]`), in Cargo's `[lints]` shape. Missing ones are only
-  reported, since fixing them means committing to the repo.
-- `[tags.<name>] dockerfile_runs = [...]` lists commands some `RUN` of the
-  root Dockerfile must run, also only reported. The `container` tag, which
-  rust-ci's `container` input brings, asks for `cargo chef cook`: dependencies
-  built in a cached layer of their own (see the example in
-  [`rust-ci.yml`](.github/workflows/rust-ci.yml)).
-- Rust repos share their CI and release workflows,
-  [`rust-ci.yml`](.github/workflows/rust-ci.yml) and
-  [`rust-release.yml`](.github/workflows/rust-release.yml), calling them from
-  their own `.github/workflows/ci.yml` and `release.yml` (`[workflows]` in the
-  manifest). The inputs they pass (`crates-io`,
-  `binaries`, `homebrew`, `winget`; `container` for CI) are where they say what they ship. forge
-  reads that call: each input turned on counts as a tag, so it brings that tag's
-  secrets, and calling the workflow at all brings the `rust-release` tag.
-  Homebrew can't reach a private repo, so from one `homebrew` ships the
-  `binaries` archives through a `{repo}-dist-vX.Y.Z` release on the tap.
-- Repos written in [T](https://github.com/lkurcak/t-lang) carry the `t` tag
-  and call [`t-ci.yml`](.github/workflows/t-ci.yml) from their own
-  `.github/workflows/t.yml` (`ci.yml` is Rust's). They pass the `t` release
-  they're checked with, `t-version` and the `t-sha256` of its Linux archive,
-  and optionally `run`, the command that checks them (`tests/run.sh`).
-- The latest GitHub release is checked too: its tag must look like
-  `release_tag_prefix` + `X.Y.Z`, it must have a
-  `{repo}-vX.Y.Z-{target}.tar.gz` (`.zip` on Windows) for each target the
-  workflow builds, and it must have reached crates.io, the `homebrew-tap`
-  formula and winget-pkgs, for repos shipping there. An open PR delivering it
-  shows as `pending`; the rest is only reported, since the fix is the next
-  release.
-- Open Dependabot alerts are reported, as `pending` while a bot PR fixing
-  one is under a week old; dismiss on GitHub any that don't apply. Bot PRs
-  open longer than a week are reported too.
+- `rulesets = [...]` names rulesets, applied as repository rulesets. Private
+  repos are skipped, since rulesets there need GitHub Pro. Built in:
+  - `protect-default-branch`: no deleting or force-pushing the default branch
+  - `require-pr`: changes to the default branch go through a PR
+  - `require-pr-title`: the shared PR title check must pass
+  - `protect-release-tags`: no deleting or moving `v*` tags
 
-`forge stale [--days 90]` lists open issues and PRs in every owned repo,
-managed or not, that have had no activity for that long, leaving out any
-with a label in `[stale] ignore_labels` (a backlog of feature ideas, say).
-It only lists them.
+  A `rulesets/NAME.json` next to the manifest adds a ruleset, or replaces a
+  built-in one, with a body in the
+  [REST API shape](https://docs.github.com/en/rest/repos/rules).
+- `release_tag_prefix`: the latest GitHub release of each repo must be
+  tagged this plus `X.Y.Z`. A repo can set its own, or `releases = false` for
+  releases that aren't versions of it (a Homebrew tap's bottles, say).
 
-Only keys present in the manifest are checked, so the live state can carry
-anything else without counting as drift.
+### Tags
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the PR title convention. When adding
-the policy to a repo, copy [pr.yml](.github/workflows/pr.yml), merge it, then
-run `forge apply REPO` with the updated forge binary. `forge check REPO`
-reports a missing caller; forge doesn't commit workflow files for you.
-Existing PRs may need a title edit or new push to run the new check.
+A repo's `tags = [...]` bring the requirements under `[tags.NAME]`. A tag
+without a table is just a label. A tag can carry:
+
+- `settings`, applied over the top-level ones and under the repo's own;
+- `rulesets`, added to the repo's own;
+- `variables = { NAME = "value" }`, Actions variables;
+- `secrets = { NAME = "~/path" }`, Actions secrets, read from local files.
+  They're only set when missing, since GitHub never reveals their values;
+  `forge apply --update-secrets` overwrites them, after renewing a token, say.
+  `forbidden_secrets = [...]` must not exist;
+- `[tags.NAME.environments.ENV]`, a deployment environment that must exist.
+  `deploy_tags = [...]` lets only those tag patterns deploy to it, and no
+  branch;
+- `calls = [...]`, shared workflows the repo must call (see below). A repo
+  declines one with the `no-WORKFLOW` tag;
+- `needs_public = true`, for features GitHub only offers public repos. Every
+  public repo then has to carry the tag or decline it with `no-NAME`, and a
+  private one carrying it is reported, so a visibility change shows up;
+- `[tags.NAME.lints]`, lints every Cargo package must set (or inherit from
+  `[workspace.lints]`), at least this strictly, in Cargo's `[lints]` shape;
+- `dockerfile_runs = [...]`, commands some `RUN` of the root Dockerfile must
+  run.
+
+Lints, Dockerfiles and workflow calls are only reported, since fixing them
+means committing to the repo.
+
+### Shared workflows
+
+`[workflows]` maps the file a repo calls a shared workflow from to the
+workflow's `uses:` reference:
+
+```toml
+[workflows]
+"ci.yml" = "lkurcak/forge/.github/workflows/rust-ci.yml@v1"
+```
+
+forge reads each shared workflow at that ref, and checks that callers use the
+same ref and only inputs it has. Calling one tags the repo with the
+workflow's name (`rust-ci`) and with each input it turns on
+(`container: true` tags it `container`), so those tags' requirements apply.
+
+This repo's workflows are public, and anyone can call them at `@v1`, which
+moves along with compatible changes:
+
+- [`rust-ci.yml`](.github/workflows/rust-ci.yml): fmt, clippy, tests on
+  Linux, macOS and Windows, docs, packaging and the MSRV. With
+  `container: true` it builds and publishes a multi-arch image to ghcr.io
+  instead of testing on macOS and Windows.
+- [`rust-release.yml`](.github/workflows/rust-release.yml): on a `vX.Y.Z`
+  tag, publishes to crates.io through trusted publishing, attaches binaries
+  to the GitHub release, and bumps the formula in `{owner}/homebrew-tap` and
+  the package in winget-pkgs. forge then checks the latest release reached
+  each of them.
+- [`pr-title.yml`](.github/workflows/pr-title.yml): PR titles follow
+  [Conventional Commits](https://www.conventionalcommits.org/).
+- [`t-ci.yml`](.github/workflows/t-ci.yml): checks repos written in
+  [T](https://github.com/lkurcak/t-lang).
+
+Each file's header shows how to call it, and its inputs say what they do.
+
+### Also reported
+
+- A latest release whose tag doesn't match `release_tag_prefix`, that lacks
+  one of the archives its release workflow builds, or that hasn't reached
+  crates.io, the Homebrew formula or winget-pkgs. An open PR delivering it
+  shows as pending.
+- Open Dependabot alerts, as pending while a bot PR fixing one is under a
+  week old. Bot PRs open longer than a week are reported too.
 
 ## Credentials
 
-forge calls the API through `gh`, using the token gh holds for the manifest's
-`owner` (`gh auth token --user <owner>`), so the active gh account doesn't
-matter. `GH_TOKEN` overrides this.
+forge uses the token gh holds for the manifest's `owner`
+(`gh auth token --user OWNER`), so the active gh account doesn't matter.
+`GH_TOKEN` overrides it.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md).
