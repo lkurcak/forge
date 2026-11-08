@@ -14,10 +14,11 @@ says what it ships:
 | --- | --- |
 | `crates-io` | `cargo publish` via trusted publishing |
 | `binaries` | `{repo}-vX.Y.Z-{target}` archives for `BINARIES_TARGETS` on the GitHub release |
-| `homebrew` | PR bumping `Formula/{repo}.rb` in `lkurcak/homebrew-tap` |
-| `winget` | Builds `WINGET_TARGETS` (x64 + arm64 Windows) and submits `lkurcak.{repo}` to winget-pkgs |
+| `homebrew` | PR bumping `Formula/{repo}.rb` in `{owner}/homebrew-tap` |
+| `winget` | Builds `WINGET_TARGETS` (x64 + arm64 Windows) and submits `{owner}.{repo}` to winget-pkgs |
 
-forge reads that call. Each input set to true counts as a tag in `forge.toml`, so
+forge reads that call. Each input set to true counts as a tag in the manifest
+(`forge.toml` in lkurcak/forge-config, cloned at `~/repos/tooling/forge-config`), so
 `forge apply` sets up what it needs (the tap App secrets, `WINGET_PAT`, the `release`
 environment), and `forge check` reports what's missing, including whether each channel
 has the latest release (open PRs show as `pending`). Adding a channel means turning an
@@ -36,7 +37,7 @@ input on, running `forge apply`, and cutting a release.
    when it's missing, like tend does.
 2. **Turn the inputs on** in the repo's `.github/workflows/release.yml`. If it doesn't
    call the shared workflow yet, replace the file with the call (copy gud's). The repo
-   must be in `forge.toml` (any tags; channels don't go there). Commit it with the rest
+   must be in the manifest (any tags; channels don't go there). Commit it with the rest
    of the change.
 3. **One-time prerequisites per channel**, if the repo is new to it:
    - `crates-io`: the crate needs a trusted publisher on crates.io (repo, workflow
@@ -69,8 +70,8 @@ input on, running `forge apply`, and cutting a release.
 
 Callers use `@v1`, a moving tag. For compatible changes, commit and move the tag
 (`git tag -f v1`; the user runs `git push origin main && git push -f origin v1`). For an
-incompatible change (renamed or removed input), point `release_workflow` in `forge.toml`
-at `v2`; `forge check` then lists every repo still calling `v1`, to migrate one by one.
+incompatible change (renamed or removed input), point the workflow's entry in the
+manifest's `[workflows]` at `v2`; `forge check` then lists every repo still calling `v1`, to migrate one by one.
 
 Targets are the workflow's `{INPUT}_TARGETS` env lists, which forge reads too. Runners per
 target are picked in its `verify` job; a new target may need a line there.

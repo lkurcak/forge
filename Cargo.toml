@@ -1,11 +1,19 @@
 [package]
-name = "forge"
+name = "forgectl"
 version = "0.1.0"
 edition = "2024"
-description = "Keep GitHub repositories in line with a manifest"
+description = "Keep a GitHub account's repositories in line with one manifest"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/lkurcak/forge"
-publish = false
+readme = "README.md"
+keywords = ["github", "repository", "settings", "rulesets", "cli"]
+categories = ["command-line-utilities", "development-tools"]
+exclude = [".claude", ".github/dependabot.yml", ".github/workflows/ci.yml", ".github/workflows/pr.yml", ".github/workflows/release.yml"]
+
+# The crate is forgectl, since forge was taken; the command is still forge.
+[[bin]]
+name = "forge"
+path = "src/main.rs"
 
 [dependencies]
 anyhow = "1.0.104"

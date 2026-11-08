@@ -87,7 +87,7 @@ rulesets = ["protect-default-branch"]
   - `protect-default-branch`: no deleting or force-pushing the default branch
   - `require-pr`: changes to the default branch go through a PR
   - `require-pr-title`: the shared PR title check must pass
-  - `protect-release-tags`: no deleting or moving `v*` tags
+  - `protect-release-tags`: no deleting or moving `vX.Y.Z` tags
 
   A `rulesets/NAME.json` next to the manifest adds a ruleset, or replaces a
   built-in one, with a body in the
