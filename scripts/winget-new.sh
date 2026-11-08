@@ -6,16 +6,22 @@
 #   scripts/winget-new.sh REPO            # write the manifests and validate them
 #   scripts/winget-new.sh REPO --submit   # ...and open the PR to winget-pkgs
 #
+# REPO is OWNER/NAME, or just NAME for one of the signed-in gh account's.
 # Needs gh, jq, curl, komac and the token in ~/.config/forge/winget-pat.
 # `komac new` would ask which file in the zip to install even with every flag
 # given, so the manifests are written here and only submitted with komac.
 set -euo pipefail
 
-repo=${1:?usage: winget-new.sh REPO [--submit]}
+repo=${1:?usage: winget-new.sh [OWNER/]REPO [--submit]}
 mode=--dry-run
 [[ ${2:-} == --submit ]] && mode=--yes
 
-owner=$(sed -n 's/^owner = "\(.*\)"/\1/p' "$(dirname "$0")/../forge.toml")
+if [[ $repo == */* ]]; then
+  owner=${repo%%/*}
+  repo=${repo#*/}
+else
+  owner=$(gh api user --jq .login)
+fi
 full=$owner/$repo
 id=$owner.$repo
 token=$(cat ~/.config/forge/winget-pat)
@@ -34,7 +40,8 @@ license=$(sed -n 's/^license = "\(.*\)"/\1/p' <<<"$cargo_toml" | head -n1)
 [[ -n $license ]] || { echo "error: can't tell $full's license" >&2; exit 1; }
 
 dir=$(mktemp -d)
-out=$dir/manifests/${owner:0:1}/$owner/$repo/$version
+initial=${owner:0:1}
+out=$dir/manifests/${initial,,}/$owner/$repo/$version
 mkdir -p "$out"
 header="# Created with forge's winget-new.sh"
 

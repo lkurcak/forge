@@ -7,7 +7,25 @@ use serde::Deserialize;
 use serde_json::{Map, Value};
 
 use crate::cargo::Lints;
-use crate::workflow::{Call, SharedWorkflow};
+use crate::workflow::{Call, Reference, SharedWorkflow};
+
+/// Rulesets anyone can use by name. A file of the same name in `rulesets/`
+/// next to the manifest takes their place.
+const BUILT_IN_RULESETS: &[(&str, &str)] = &[
+    (
+        "protect-default-branch",
+        include_str!("../rulesets/protect-default-branch.json"),
+    ),
+    ("require-pr", include_str!("../rulesets/require-pr.json")),
+    (
+        "require-pr-title",
+        include_str!("../rulesets/require-pr-title.json"),
+    ),
+    (
+        "protect-release-tags",
+        include_str!("../rulesets/protect-release-tags.json"),
+    ),
+];
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -21,7 +39,7 @@ struct RawManifest {
     actions: Map<String, Value>,
     release_tag_prefix: Option<String>,
     /// Workflow file repos call a shared workflow from, to its `uses:`
-    /// reference. The shared workflows live next to the manifest.
+    /// reference. forge reads the shared workflow at that reference.
     #[serde(default)]
     workflows: BTreeMap<String, String>,
     #[serde(default)]
@@ -110,7 +128,10 @@ struct RawRepo {
 pub struct Manifest {
     pub owner: String,
     pub repos: Vec<Repo>,
+    /// Filled in by [`Self::fetch_workflows`].
     pub workflows: Vec<SharedWorkflow>,
+    /// `[workflows]`: the file callers call from, and the `uses:` reference.
+    workflow_refs: Vec<(String, String)>,
     pub stale: Stale,
     tags: BTreeMap<String, Tag>,
 }
@@ -276,14 +297,14 @@ impl Manifest {
             })
             .collect::<Result<_>>()?;
 
-        let workflows: Vec<SharedWorkflow> = raw
+        let names = raw
             .workflows
-            .iter()
-            .map(|(caller, uses)| SharedWorkflow::load(dir, caller, uses))
-            .collect::<Result<_>>()?;
+            .values()
+            .map(|uses| Ok(Reference::parse(uses)?.name().to_owned()))
+            .collect::<Result<Vec<_>>>()?;
         for (name, tag) in &tags {
             for call in &tag.calls {
-                if !workflows.iter().any(|w| &w.name == call) {
+                if !names.contains(call) {
                     bail!("tag {name} calls {call}, which isn't in [workflows]");
                 }
             }
@@ -292,10 +313,25 @@ impl Manifest {
         Ok(Self {
             owner: raw.owner,
             repos,
-            workflows,
+            workflows: Vec::new(),
+            workflow_refs: raw.workflows.into_iter().collect(),
             stale: raw.stale,
             tags,
         })
+    }
+
+    /// Reads each shared workflow in `[workflows]` with `read`, given the
+    /// caller's file name and the `uses:` reference.
+    pub fn fetch_workflows(
+        &mut self,
+        read: impl Fn(&str, &str) -> Result<SharedWorkflow>,
+    ) -> Result<()> {
+        self.workflows = self
+            .workflow_refs
+            .iter()
+            .map(|(caller, uses)| read(caller, uses))
+            .collect::<Result<_>>()?;
+        Ok(())
     }
 
     /// Merges the requirements of the repo's tags. A repo calling a shared
@@ -408,15 +444,28 @@ impl Actions {
 }
 
 impl Ruleset {
-    /// Reads `{name}.json` from `dir`, naming the ruleset after the file.
+    /// Reads `{name}.json` from `dir`, or else the built-in ruleset of that
+    /// name, naming the ruleset after it.
     fn read(dir: &Path, name: &str) -> Result<Self> {
         let file = dir.join(format!("{name}.json"));
-        let text =
-            fs::read_to_string(&file).with_context(|| format!("reading {}", file.display()))?;
+        let (text, source) = if file.exists() {
+            let text =
+                fs::read_to_string(&file).with_context(|| format!("reading {}", file.display()))?;
+            (text, file.display().to_string())
+        } else if let Some((_, text)) = BUILT_IN_RULESETS.iter().find(|(n, _)| *n == name) {
+            ((*text).to_owned(), format!("built-in ruleset {name}"))
+        } else {
+            let built_in: Vec<_> = BUILT_IN_RULESETS.iter().map(|(n, _)| *n).collect();
+            bail!(
+                "no ruleset {name}: not in {} and not built in ({})",
+                dir.display(),
+                built_in.join(", ")
+            );
+        };
         let mut body: Value =
-            serde_json::from_str(&text).with_context(|| format!("parsing {}", file.display()))?;
+            serde_json::from_str(&text).with_context(|| format!("parsing {source}"))?;
         body.as_object_mut()
-            .with_context(|| format!("{} is not a JSON object", file.display()))?
+            .with_context(|| format!("{source} is not a JSON object"))?
             .insert("name".into(), name.into());
         Ok(Self {
             name: name.into(),
@@ -458,22 +507,22 @@ mod tests {
     }
 
     #[test]
-    fn tracked_repos_require_the_title_workflow() {
-        let manifest =
-            Manifest::load(&Path::new(env!("CARGO_MANIFEST_DIR")).join("forge.toml")).unwrap();
-        let calls: Vec<_> = manifest.workflows.iter().map(|_| None).collect();
-        for repo in &manifest.repos {
-            let needs = manifest.needs(repo, &calls, true);
-            assert!(needs.calls.iter().any(|call| call == "pr-title"));
-            for name in ["require-pr", "require-pr-title"] {
-                assert_eq!(
-                    needs.rulesets.iter().any(|rule| rule.name == name),
-                    repo.name != "homebrew-tap",
-                    "{}: {name}",
-                    repo.name
-                );
-            }
-        }
+    fn reads_built_in_and_custom_rulesets() {
+        let dir = std::env::temp_dir().join(format!("forge-rulesets-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("mine.json"), r#"{"target": "tag"}"#).unwrap();
+        let mine = Ruleset::read(&dir, "mine").unwrap();
+        let built_in = Ruleset::read(&dir, "require-pr").unwrap();
+        let missing = Ruleset::read(&dir, "nope").map(|_| ()).unwrap_err();
+        fs::remove_dir_all(&dir).unwrap();
+
+        assert_eq!(mine.body, json!({ "target": "tag", "name": "mine" }));
+        assert_eq!(built_in.body["name"], "require-pr");
+        assert_eq!(built_in.body["target"], "branch");
+        assert!(
+            missing.to_string().contains("require-pr-title"),
+            "{missing}"
+        );
     }
 
     #[test]
