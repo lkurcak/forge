@@ -84,7 +84,9 @@ rulesets = ["protect-default-branch"]
   `GITHUB_TOKEN`'s defaults), and `[actions.selected-actions]` to the
   allowlist, checked while `allowed_actions` is `selected`.
 - `rulesets = [...]` names rulesets, applied as repository rulesets. Private
-  repos are skipped, since rulesets there need GitHub Pro. Built in:
+  repos only get theirs with `private_rulesets = true` at the top level,
+  since rulesets there need GitHub Pro (or Team, for an organization): the
+  plan can lapse without the manifest changing. Built in:
   - `protect-default-branch`: no deleting or force-pushing the default branch
   - `require-pr`: changes to the default branch go through a PR
   - `require-pr-title`: the shared PR title check must pass
@@ -146,7 +148,11 @@ moves along with compatible changes:
 - [`rust-ci.yml`](.github/workflows/rust-ci.yml): fmt, clippy, tests on
   Linux, macOS and Windows, docs, packaging and the MSRV. With
   `container: true` it builds and publishes a multi-arch image to ghcr.io
-  instead of testing on macOS and Windows.
+  instead of testing on macOS and Windows. With `light: true`, for repos
+  whose Actions minutes are billed (private ones), it's a sanity check: one
+  Linux job on pull requests (fmt, clippy and, unless `tests: false`, the
+  tests), and on pushes only the image, for linux/amd64 unless
+  `arm64: true`.
 - [`rust-release.yml`](.github/workflows/rust-release.yml): on a `vX.Y.Z`
   tag, publishes to crates.io through trusted publishing, attaches binaries
   to the GitHub release, and bumps the formula in `{owner}/homebrew-tap` and
@@ -185,8 +191,8 @@ The `require-ci` ruleset requires the check `ci / ok`, which `rust-ci.yml`
 and `t-ci.yml` end with: it passes only if every other job of theirs passed
 or was skipped, whichever ones a repo's inputs turn on. So call them from a
 job named `ci`. With it, and the `allow_auto_merge` setting, `gh pr merge
---auto` merges a PR once all of CI is green. Rulesets need GitHub Pro on
-private repos, which forge skips, so this is for public ones.
+--auto` merges a PR once all of CI is green. On private repos it needs
+`private_rulesets = true`, and so GitHub Pro.
 
 ### Releasing a version bump
 

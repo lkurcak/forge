@@ -102,14 +102,20 @@ pub fn reconcile(gh: &Gh, manifest: &Manifest, repo: &Repo, mode: Mode) -> Outco
 
     actions_drift(gh, mode, &base, &repo.actions, &mut outcome);
 
-    rulesets_drift(
-        gh,
-        mode,
-        &base,
-        &needs.rulesets,
-        missing_workflows,
-        &mut outcome,
-    );
+    if public || manifest.private_rulesets {
+        rulesets_drift(
+            gh,
+            mode,
+            &base,
+            &needs.rulesets,
+            missing_workflows,
+            &mut outcome,
+        );
+    } else if !needs.rulesets.is_empty() {
+        outcome
+            .skipped
+            .push("rulesets (private repo, without private_rulesets)".into());
+    }
 
     if !needs.variables.is_empty() {
         let result = variables_drift(gh, mode, &base, &needs);
