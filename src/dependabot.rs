@@ -15,7 +15,7 @@ use crate::release::Findings;
 /// How many days a bot's PR may stay open before it's worth a look.
 const BOT_PR_DAYS: i64 = 7;
 
-/// Open alerts, each pending while a young bot PR fixes it, and bot PRs
+/// Open alerts, each pending while a young bot or `forge deps` PR fixes it, and bot PRs
 /// open for longer than [`BOT_PR_DAYS`]. Repos with alerts turned off have none.
 pub fn check(gh: &Gh, base: &str) -> Result<Findings> {
     let alerts = match gh.get(&format!("{base}/dependabot/alerts?state=open&per_page=100")) {
@@ -28,6 +28,13 @@ pub fn check(gh: &Gh, base: &str) -> Result<Findings> {
         .into_iter()
         .flatten()
         .filter(|pr| pr["user"]["type"] == "Bot")
+        .collect();
+    // `forge deps` PRs fix alerts too.
+    let fixing: Vec<&Value> = pulls
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|pr| pr["user"]["type"] == "Bot" || pr["head"]["ref"] == crate::deps::BRANCH)
         .collect();
     let today = days::today();
     let open_for = |pr: &Value| {
@@ -50,11 +57,12 @@ pub fn check(gh: &Gh, base: &str) -> Result<Findings> {
                 .as_str()
                 .unwrap_or("unknown")
         );
-        // Dependabot's PRs link each package they bump as `[name](url)`.
-        let fix = bot_prs.iter().find(|pr| {
-            pr["body"]
-                .as_str()
-                .is_some_and(|body| body.contains(&format!("[{package}]")))
+        // Dependabot's PRs link each package they bump as `[name](url)`;
+        // `forge deps` lists them in a table, `| name | from | to |`.
+        let fix = fixing.iter().find(|pr| {
+            pr["body"].as_str().is_some_and(|body| {
+                body.contains(&format!("[{package}]")) || body.contains(&format!("| {package} |"))
+            })
         });
         let patched =
             alert["security_vulnerability"]["first_patched_version"]["identifier"].as_str();

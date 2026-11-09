@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-09
+
+### Added
+
+- `vulnerability_alerts = true` in `[settings]` turns on Dependabot alerts,
+  and `forge check` reports a repo where they're off. They're free on
+  private repos too, and `forge deps` needs them for `alerts_only` tags.
+
+### Fixed
+
+- `forge check` counts an open `forge deps` PR as the fix for the Dependabot
+  alerts it resolves, as it does Dependabot's own PRs, instead of reporting
+  that no PR bumps them.
+
 ## [0.4.0] - 2026-11-09
 
 ### Added
@@ -95,7 +109,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Prebuilt binaries for Windows, macOS and Linux are attached to each
   [GitHub release](https://github.com/lkurcak/forge/releases).
 
-[Unreleased]: https://github.com/lkurcak/forge/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/lkurcak/forge/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/lkurcak/forge/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/lkurcak/forge/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/lkurcak/forge/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/lkurcak/forge/compare/v0.1.1...v0.2.0
