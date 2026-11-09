@@ -80,3 +80,18 @@ jobs:
         env:
           RUN: ${{ inputs.run }}
         run: bash -c "$RUN"
+
+  # The check a ruleset requires (require-ci, "ci / ok"), as for Rust repos,
+  # so a PR's auto-merge waits for it.
+  ok:
+    if: always()
+    needs: [test]
+    permissions: {}
+    runs-on: ubuntu-latest
+    steps:
+      - name: The checks passed
+        env:
+          RESULT: ${{ needs.test.result }}
+        run: |
+          echo "$RESULT"
+          [ "$RESULT" = success ]

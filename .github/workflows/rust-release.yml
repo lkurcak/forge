@@ -1,17 +1,21 @@
 name: Rust release
 
 # The release pipeline shared by every Rust repo forge manages. Each repo's
-# release.yml calls it on a vX.Y.Z tag push:
+# release.yml calls it on a vX.Y.Z tag push, and, to release whenever a
+# version bump lands, on pushes to the default branch too:
 #
 #   on:
 #     push:
 #       tags: ["v[0-9]+.[0-9]+.[0-9]+"]
+#       branches: [main]
+#     workflow_dispatch:
 #   jobs:
 #     release:
 #       uses: lkurcak/forge/.github/workflows/rust-release.yml@v1
 #       permissions:
 #         contents: write
 #         id-token: write
+#         actions: write
 #       secrets: inherit
 #       with:
 #         crates-io: true
@@ -78,7 +82,46 @@ env:
     aarch64-pc-windows-msvc
 
 jobs:
+  # On a push to the default branch: if Cargo.toml's version has no vX.Y.Z
+  # tag yet, tag the pushed commit and run this workflow again on the tag,
+  # which releases it. Only a tag may deploy to the release environment, and
+  # a tag pushed with the workflow's token starts no run of its own, but a
+  # dispatch does. Then merging a PR that bumps the version releases it.
+  tag:
+    if: github.ref_type == 'branch' && github.ref_name == github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: write
+    concurrency:
+      group: release-tag-${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Tag a new version, and release it
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.sha }}
+        run: |
+          version=$(cargo metadata --no-deps --format-version 1 \
+            | jq -r '.packages as $all
+                | [$all[] | select(.publish != [])] | if length > 0 then . else $all end
+                | .[0].version')
+          tag="v$version"
+          if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+            echo "$tag is tagged already: nothing to release"
+            exit 0
+          fi
+          git tag "$tag" "$SHA"
+          git push origin "refs/tags/$tag"
+          workflow=${GITHUB_WORKFLOW_REF%%@*}
+          gh workflow run "${workflow##*/}" --ref "$tag" --repo "$GITHUB_REPOSITORY"
+          echo "Tagged $SHA as $tag, and started the release on it"
+
   verify:
+    if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
     permissions:
       contents: read

@@ -99,6 +99,23 @@ impl Gh {
         Ok(Some(String::from_utf8(out.stdout)?))
     }
 
+    /// Turns on auto-merge (squash) for the PR at `url`: it merges once its
+    /// required checks pass.
+    pub fn auto_merge(&self, url: &str) -> Result<()> {
+        let out = Command::new("gh")
+            .args(["pr", "merge", url, "--auto", "--squash"])
+            .env("GH_TOKEN", &self.token)
+            .output()
+            .context("running gh")?;
+        if !out.status.success() {
+            bail!(
+                "turning on auto-merge for {url}: {}",
+                String::from_utf8_lossy(&out.stderr).trim()
+            );
+        }
+        Ok(())
+    }
+
     /// Sets an Actions secret; gh takes care of encrypting it for the repo.
     pub fn set_secret(&self, repo: &str, name: &str, value: &[u8]) -> Result<()> {
         let mut child = Command::new("gh")

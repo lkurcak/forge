@@ -6,6 +6,7 @@ mod docker;
 mod gh;
 mod init;
 mod manifest;
+mod pins;
 mod progress;
 mod reconcile;
 mod release;
@@ -68,6 +69,15 @@ enum Command {
         #[arg(long)]
         owner: Option<String>,
     },
+    /// Open a PR in each repository whose `[pins]` input is behind the
+    /// release it pins, moving it there, with auto-merge on.
+    Bump {
+        /// Repositories to bump (default: all managed).
+        repos: Vec<String>,
+        /// Only say which PRs would be opened.
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// List open issues and PRs in any owned repo that have gone quiet.
     Stale {
         /// Days without activity before one counts as quiet.
@@ -97,6 +107,9 @@ fn run() -> Result<ExitCode> {
     let mut manifest = Manifest::load(&path)?;
     let gh = Gh::new(&manifest.owner)?;
     manifest.fetch_workflows(|caller, uses| SharedWorkflow::fetch(&gh, caller, uses))?;
+    if matches!(cli.command, Command::Check { .. } | Command::Bump { .. }) {
+        manifest.fetch_pins(&gh)?;
+    }
 
     match cli.command {
         Command::Check { repos } => sync(&gh, &manifest, &repos, Mode::Check),
@@ -106,6 +119,7 @@ fn run() -> Result<ExitCode> {
         } => sync(&gh, &manifest, &repos, Mode::Apply { update_secrets }),
         Command::List => list(&gh, &manifest),
         Command::Stale { days } => stale(&gh, &manifest, days),
+        Command::Bump { repos, dry_run } => bump(&gh, &manifest, &repos, dry_run),
         Command::Init { .. } => unreachable!("handled before loading a manifest"),
     }
 }
@@ -161,6 +175,7 @@ fn sync(gh: &Gh, manifest: &Manifest, names: &[String], mode: Mode) -> Result<Ex
             progress.report(i, &report(&repos[i].name, &outcome, mode));
             failed |= !outcome.errors.is_empty()
                 || !outcome.manual.is_empty()
+                || !outcome.behind.is_empty()
                 || (mode == Mode::Check && !outcome.drift.is_empty());
         },
     );
@@ -175,7 +190,7 @@ fn sync(gh: &Gh, manifest: &Manifest, names: &[String], mode: Mode) -> Result<Ex
 fn mark(outcome: &Outcome, mode: Mode) -> &'static str {
     if !outcome.errors.is_empty() {
         "!"
-    } else if !outcome.manual.is_empty() {
+    } else if !outcome.manual.is_empty() || !outcome.behind.is_empty() {
         "✗"
     } else if outcome.drift.is_empty() {
         "✓"
@@ -193,6 +208,7 @@ fn report(name: &str, outcome: &Outcome, mode: Mode) -> String {
         ("", "", &outcome.drift),
         ("", " (fix by hand)", &outcome.manual),
         ("pending: ", "", &outcome.pending),
+        ("behind: ", " (`forge bump` opens a PR)", &outcome.behind),
         ("skipped ", "", &outcome.skipped),
         ("error: ", "", &outcome.errors),
     ];
@@ -305,6 +321,43 @@ fn list(gh: &Gh, manifest: &Manifest) -> Result<ExitCode> {
     }
 
     Ok(ExitCode::SUCCESS)
+}
+
+fn bump(gh: &Gh, manifest: &Manifest, names: &[String], dry_run: bool) -> Result<ExitCode> {
+    let repos = select(manifest, names)?;
+    let mut failed = false;
+    for (file, pin, latest) in &manifest.pins {
+        let Some(latest) = latest else { continue };
+        for repo in &repos {
+            let result =
+                pins::behind(gh, &manifest.owner, &repo.name, file, pin, latest).and_then(|b| {
+                    match b {
+                        None => Ok(None),
+                        Some(_) if dry_run => Ok(Some("would open a PR".to_owned())),
+                        Some(b) => Ok(Some(
+                            pins::bump(gh, &manifest.owner, pin, &b)?
+                                .unwrap_or_else(|| "a PR is open already".to_owned()),
+                        )),
+                    }
+                });
+            match result {
+                Ok(Some(what)) => println!(
+                    "{} {}: {} → {}: {what}",
+                    repo.name, file, pin.version, latest.tag
+                ),
+                Ok(None) => {}
+                Err(err) => {
+                    failed = true;
+                    eprintln!("{} {file}: error: {err:#}", repo.name);
+                }
+            }
+        }
+    }
+    Ok(if failed {
+        ExitCode::FAILURE
+    } else {
+        ExitCode::SUCCESS
+    })
 }
 
 fn stale(gh: &Gh, manifest: &Manifest, days: i64) -> Result<ExitCode> {

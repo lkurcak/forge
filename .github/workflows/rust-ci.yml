@@ -359,3 +359,21 @@ jobs:
             args+=("$IMAGE@sha256:$digest")
           done
           docker buildx imagetools create "${args[@]}"
+
+  # One check that passes only if every job above passed or was skipped:
+  # what a ruleset requires (require-ci, "ci / ok"), so a PR's auto-merge
+  # waits for all of CI, whichever jobs a repo's inputs turn on.
+  ok:
+    if: always()
+    needs: [fmt, clippy, test, doc, package, msrv, no-std, container, container-publish]
+    permissions: {}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Every job passed or was skipped
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "$RESULTS"
+          for r in $RESULTS; do
+            case "$r" in success|skipped) ;; *) exit 1 ;; esac
+          done
