@@ -1,6 +1,11 @@
 name: PR title
 
 # Repos call this from pr.yml, including forge itself.
+#
+# Private repos skip it: their Actions minutes are billed, at least a minute
+# for every PR event. A skipped check counts as passed, so a ruleset requiring
+# it would hold nothing there, and forge leaves require-pr-title out on
+# private repos.
 on:
   workflow_call:
 
@@ -13,6 +18,7 @@ concurrency:
 jobs:
   check:
     name: PR title
+    if: ${{ !github.event.repository.private }}
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:

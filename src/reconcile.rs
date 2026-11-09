@@ -23,6 +23,10 @@ impl Mode {
     }
 }
 
+/// The built-in ruleset requiring pr-title.yml's check, which skips private
+/// repos: a skipped check counts as passed.
+const PR_TITLE_RULESET: &str = "require-pr-title";
+
 /// What reconciling one repository found.
 #[derive(Default)]
 pub struct Outcome {
@@ -103,14 +107,14 @@ pub fn reconcile(gh: &Gh, manifest: &Manifest, repo: &Repo, mode: Mode) -> Outco
     actions_drift(gh, mode, &base, &repo.actions, &mut outcome);
 
     if public || manifest.private_rulesets {
-        rulesets_drift(
-            gh,
-            mode,
-            &base,
-            &needs.rulesets,
-            missing_workflows,
-            &mut outcome,
-        );
+        let mut rulesets = needs.rulesets.clone();
+        if !public && rulesets.iter().any(|r| r.name == PR_TITLE_RULESET) {
+            rulesets.retain(|r| r.name != PR_TITLE_RULESET);
+            outcome.skipped.push(format!(
+                "ruleset {PR_TITLE_RULESET} (pr-title skips private repos, so it would always pass)"
+            ));
+        }
+        rulesets_drift(gh, mode, &base, &rulesets, missing_workflows, &mut outcome);
     } else if !needs.rulesets.is_empty() {
         outcome
             .skipped
