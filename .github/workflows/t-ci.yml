@@ -49,7 +49,10 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  test:
+  # Named `ok`, so it's the check a ruleset requires (require-ci, "ci / ok"),
+  # as for Rust repos, and a PR's auto-merge waits for it. rust-ci needs a
+  # job of that name to sum up its others; with a single job, it's that job.
+  ok:
     permissions:
       contents: read
     runs-on: ubuntu-latest
@@ -80,18 +83,3 @@ jobs:
         env:
           RUN: ${{ inputs.run }}
         run: bash -c "$RUN"
-
-  # The check a ruleset requires (require-ci, "ci / ok"), as for Rust repos,
-  # so a PR's auto-merge waits for it.
-  ok:
-    if: always()
-    needs: [test]
-    permissions: {}
-    runs-on: ubuntu-latest
-    steps:
-      - name: The checks passed
-        env:
-          RESULT: ${{ needs.test.result }}
-        run: |
-          echo "$RESULT"
-          [ "$RESULT" = success ]
