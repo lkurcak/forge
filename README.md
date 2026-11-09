@@ -164,7 +164,10 @@ moves along with compatible changes:
   the package in winget-pkgs. forge then checks the latest release reached
   each of them.
 - [`pr-title.yml`](.github/workflows/pr-title.yml): PR titles follow
-  [Conventional Commits](https://www.conventionalcommits.org/).
+  [Conventional Commits](https://www.conventionalcommits.org/). Private
+  repos skip it, since their minutes are billed. A skipped check counts as
+  passed, so forge leaves the `require-pr-title` ruleset out on private
+  repos, even with `private_rulesets = true`.
 - [`t-ci.yml`](.github/workflows/t-ci.yml): checks repos written in
   [T](https://github.com/lkurcak/t-lang).
 

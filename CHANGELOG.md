@@ -20,6 +20,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   nothing reads again.
 - `t-ci.yml` is a single job, `ok`, instead of a test job and a separate
   `ok` job waiting on it: one billed job a run instead of two.
+- `pr-title.yml` skips private repos, whose minutes are billed: a minute
+  for every PR event. With `private_rulesets = true`, forge no longer applies
+  `require-pr-title` to private repos, where the skipped check would always
+  pass.
 
 ## [0.3.0] - 2026-11-09
 
