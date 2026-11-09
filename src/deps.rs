@@ -25,7 +25,7 @@ use crate::manifest::{Manifest, Repo};
 use crate::progress::Progress;
 
 /// The branch forge's PR comes from.
-const BRANCH: &str = "forge/deps";
+pub const BRANCH: &str = "forge/deps";
 const TITLE: &str = "chore(deps): update dependencies";
 
 /// What the updated Cargo.lock must pass, as `rust-ci.yml` runs it.

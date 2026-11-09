@@ -79,7 +79,9 @@ rulesets = ["protect-default-branch"]
   repo's own table overrides them: `settings` and `actions` key by key,
   `rulesets` wholesale.
 - `[settings]` goes to `PATCH /repos/{owner}/{repo}`, so any key that
-  endpoint takes works.
+  endpoint takes works. `vulnerability_alerts = true` also turns on
+  Dependabot alerts, which have an endpoint of their own; unlike secret
+  scanning, they're free on private repos too.
 - `[actions]` goes to `/actions/permissions` (whether Actions run and which
   actions may), `[actions.workflow]` to `/actions/permissions/workflow` (the
   `GITHUB_TOKEN`'s defaults), and `[actions.selected-actions]` to the

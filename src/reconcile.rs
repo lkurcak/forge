@@ -199,7 +199,9 @@ fn files_drift(gh: &Gh, repo: &str, needs: &Needs, outcome: &mut Outcome) {
 /// Settings for `PATCH /repos/{owner}/{repo}`. `security_and_analysis` goes
 /// in a request of its own: GitHub ignores it when other settings change in
 /// the same one. Its `dependabot_security_updates` is ignored even there, so
-/// it goes through `/automated-security-fixes`.
+/// it goes through `/automated-security-fixes`. `vulnerability_alerts`
+/// (Dependabot alerts) isn't a setting GitHub reports at all; it has an
+/// endpoint of its own.
 fn settings_drift(
     gh: &Gh,
     mode: Mode,
@@ -209,7 +211,11 @@ fn settings_drift(
 ) -> Result<Vec<String>> {
     let mut settings = settings.clone();
     let security = settings.remove("security_and_analysis");
+    let alerts = settings.remove("vulnerability_alerts");
     let mut drift = object_drift(gh, mode, "settings", &settings, actual, "PATCH", base)?;
+    if let Some(alerts) = alerts {
+        drift.extend(vulnerability_alerts_drift(gh, mode, base, &alerts)?);
+    }
     if let Some(mut security) = security {
         // Ignored in the PATCH too, though its own endpoint works.
         let updates = security
@@ -239,6 +245,35 @@ fn settings_drift(
         )?);
     }
     Ok(drift)
+}
+
+/// Dependabot alerts, on or off. Their endpoint answers 204 when they're on
+/// and 404 when they're off. They're free on private repos too, unlike most
+/// of `security_and_analysis`.
+fn vulnerability_alerts_drift(
+    gh: &Gh,
+    mode: Mode,
+    base: &str,
+    wanted: &Value,
+) -> Result<Vec<String>> {
+    let wanted = wanted
+        .as_bool()
+        .context("settings.vulnerability_alerts must be true or false")?;
+    let path = format!("{base}/vulnerability-alerts");
+    let on = match gh.get(&path) {
+        Ok(_) => true,
+        Err(err) if err.to_string().contains("(HTTP 404)") => false,
+        Err(err) => return Err(err),
+    };
+    if on == wanted {
+        return Ok(Vec::new());
+    }
+    if mode.applies() {
+        gh.api(if wanted { "PUT" } else { "DELETE" }, &path, None)?;
+    }
+    Ok(vec![format!(
+        "settings.vulnerability_alerts: expected {wanted}, found {on}"
+    )])
 }
 
 /// The three Actions permission endpoints, each recorded on its own. The
