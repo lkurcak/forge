@@ -50,6 +50,7 @@ forge apply [REPO…]         # fix drift
 forge list                  # managed repos, and owned ones the manifest doesn't cover
 forge stale [--days 90]     # open issues and PRs nobody has touched in that long
 forge bump [--dry-run] [REPO…]  # open PRs moving [pins] to the latest release
+forge deps [--dry-run] [REPO…]  # a PR per Rust repo updating Cargo.lock, tested here first
 forge init [--owner NAME]   # write a starter manifest
 ```
 
@@ -192,6 +193,36 @@ asset = "t-lang-{tag}-x86_64-unknown-linux-gnu.tar.gz"   # of this asset
 sha256 from the digest GitHub keeps of the asset), and turns on auto-merge,
 so it merges itself once the repo's required checks pass: give those repos
 the `require-ci` ruleset and `allow_auto_merge`.
+
+### Updating dependencies
+
+`forge deps` moves each Rust repo's Cargo.lock to the newest versions its
+Cargo.toml allows (`cargo update`), runs clippy and the tests on this
+machine the way `rust-ci.yml` does, and if they pass opens one PR,
+`chore(deps): update dependencies`, listing each crate it moved. Where the
+repo allows auto-merge, it's turned on. Newer versions Cargo.toml doesn't
+allow are listed too, since taking them means editing it. `--dry-run` stops
+before the PR. A repo whose PR from an earlier run is still open is left
+alone.
+
+It takes the place of Dependabot's version updates, which open a PR per
+crate, each running CI on minutes a private repo pays for. Dependabot's
+security updates still cover vulnerabilities between runs.
+
+Repos are cloned into `forge/repos/OWNER/REPO` in the cache directory
+(`$XDG_CACHE_HOME`, else `~/.cache`; `%LOCALAPPDATA%` on Windows) and kept
+there, build cache and all, so later runs build incrementally. The checks'
+output goes to `forge/logs/REPO.log`. A path dependency leading out of the
+repo, like `../../libs/x`, is cloned from the owner's repo `x`, to where the
+path expects it.
+
+```toml
+[deps]
+alerts_only = ["maintenance"]
+```
+
+Repos with a tag in `alerts_only` are only updated while they have open
+Dependabot alerts about Rust crates, unless named on the command line.
 
 ### Merging on green
 
