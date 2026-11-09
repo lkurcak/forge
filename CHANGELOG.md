@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `rust-release.yml` on a default-branch push with nothing to release ran
+  the jobs that also run after a skipped one (`crates-io`, the GitHub
+  release, Homebrew, winget), which the release environment then rejected:
+  a failed run, though nothing was published. They need `verify` to have
+  succeeded now.
+
 ## [0.2.0] - 2026-11-09
 
 ### Added

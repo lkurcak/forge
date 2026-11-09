@@ -120,6 +120,9 @@ jobs:
           gh workflow run "${workflow##*/}" --ref "$tag" --repo "$GITHUB_REPOSITORY"
           echo "Tagged $SHA as $tag, and started the release on it"
 
+  # Every job below runs only after this one succeeded: those that run
+  # when an earlier job was skipped (`!failure()`) check it explicitly, as a
+  # default-branch push skips it.
   verify:
     if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
@@ -270,7 +273,7 @@ jobs:
 
   crates-io:
     needs: [verify, build]
-    if: ${{ inputs.crates-io && !failure() && !cancelled() }}
+    if: ${{ inputs.crates-io && needs.verify.result == 'success' && !failure() && !cancelled() }}
     runs-on: ubuntu-latest
     environment: release
     permissions:
@@ -287,7 +290,7 @@ jobs:
 
   github-release:
     needs: [verify, build, crates-io]
-    if: ${{ !failure() && !cancelled() }}
+    if: ${{ needs.verify.result == 'success' && !failure() && !cancelled() }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -310,7 +313,7 @@ jobs:
 
   homebrew:
     needs: [verify, github-release]
-    if: ${{ inputs.homebrew && !failure() && !cancelled() }}
+    if: ${{ inputs.homebrew && needs.verify.result == 'success' && !failure() && !cancelled() }}
     runs-on: ubuntu-latest
     environment: release
     permissions:
@@ -408,7 +411,7 @@ jobs:
 
   winget:
     needs: [verify, github-release]
-    if: ${{ inputs.winget && !failure() && !cancelled() }}
+    if: ${{ inputs.winget && needs.verify.result == 'success' && !failure() && !cancelled() }}
     runs-on: ubuntu-latest
     permissions: {}
     steps:
