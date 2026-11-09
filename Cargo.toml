@@ -1,6 +1,6 @@
 [package]
 name = "forgectl"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 description = "Keep a GitHub account's repositories in line with one manifest"
 license = "MIT OR Apache-2.0"

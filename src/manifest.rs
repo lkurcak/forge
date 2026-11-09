@@ -41,6 +41,10 @@ struct RawManifest {
     #[serde(default)]
     actions: Map<String, Value>,
     release_tag_prefix: Option<String>,
+    /// Apply rulesets to private repos too, which needs GitHub Pro (or an
+    /// organization on Team); without it forge leaves them out there.
+    #[serde(default)]
+    private_rulesets: bool,
     /// Workflow file repos call a shared workflow from, to its `uses:`
     /// reference. forge reads the shared workflow at that reference.
     #[serde(default)]
@@ -139,6 +143,8 @@ pub struct Manifest {
     /// `[workflows]`: the file callers call from, and the `uses:` reference.
     workflow_refs: Vec<(String, String)>,
     pub stale: Stale,
+    /// Whether private repos get their rulesets (`private_rulesets`).
+    pub private_rulesets: bool,
     tags: BTreeMap<String, Tag>,
     /// `[pins]`, by workflow file, with the release each should name once
     /// [`Self::fetch_pins`] has looked it up.
@@ -325,6 +331,7 @@ impl Manifest {
             workflows: Vec::new(),
             workflow_refs: raw.workflows.into_iter().collect(),
             stale: raw.stale,
+            private_rulesets: raw.private_rulesets,
             tags,
             pins: raw.pins.into_iter().map(|(f, p)| (f, p, None)).collect(),
         })
@@ -544,6 +551,21 @@ mod tests {
             missing.to_string().contains("require-pr-title"),
             "{missing}"
         );
+    }
+
+    #[test]
+    fn private_rulesets_are_opt_in() {
+        let dir = std::env::temp_dir().join(format!("forge-private-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("forge.toml");
+        fs::write(&path, "owner = \"me\"\n").unwrap();
+        let default = Manifest::load(&path).unwrap();
+        fs::write(&path, "owner = \"me\"\nprivate_rulesets = true\n").unwrap();
+        let opted_in = Manifest::load(&path).unwrap();
+        fs::remove_dir_all(&dir).unwrap();
+
+        assert!(!default.private_rulesets);
+        assert!(opted_in.private_rulesets);
     }
 
     #[test]
