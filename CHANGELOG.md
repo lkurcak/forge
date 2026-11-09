@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `private_ci = "light"` in the manifest has `forge check` report a private
+  repo calling `rust-ci.yml` without `light: true`, and a public one calling
+  it with it. Any input of the shared workflows can be named that way.
+
 ### Changed
 
 - `rust-ci.yml` with `light` keeps the Rust build cache from the default

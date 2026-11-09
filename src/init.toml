@@ -10,6 +10,11 @@ owner = "@OWNER@"
 # left alone.
 release_tag_prefix = "v"
 
+# Private repos' Actions minutes are billed. Uncommented, this keeps their CI
+# to a sanity check: forge reports a private repo calling rust-ci without
+# `light: true`, and a public one calling it with it.
+# private_ci = "light"
+
 # Repo settings, as in PATCH /repos/{owner}/{repo}. These make PRs
 # squash-only, with the PR's title and description as the commit message.
 [settings]
