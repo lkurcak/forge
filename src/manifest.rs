@@ -45,6 +45,10 @@ struct RawManifest {
     /// organization on Team); without it forge leaves them out there.
     #[serde(default)]
     private_rulesets: bool,
+    /// An input of the shared workflows that private repos must turn on and
+    /// public ones leave off, like rust-ci's `light`: only private repos'
+    /// Actions minutes are billed.
+    private_ci: Option<String>,
     /// Workflow file repos call a shared workflow from, to its `uses:`
     /// reference. forge reads the shared workflow at that reference.
     #[serde(default)]
@@ -145,6 +149,8 @@ pub struct Manifest {
     pub stale: Stale,
     /// Whether private repos get their rulesets (`private_rulesets`).
     pub private_rulesets: bool,
+    /// The input private repos' calls must turn on (`private_ci`).
+    private_ci: Option<String>,
     tags: BTreeMap<String, Tag>,
     /// `[pins]`, by workflow file, with the release each should name once
     /// [`Self::fetch_pins`] has looked it up.
@@ -200,8 +206,10 @@ struct Tag {
 #[derive(Default)]
 pub struct Needs {
     pub tags: Vec<String>,
-    /// Tags that need a public repo, on a private one or undecided on a
-    /// public one; the manifest has to change.
+    /// Where the repo's visibility disagrees with the manifest: a tag that
+    /// needs a public repo on a private one, or undecided on a public one (the
+    /// manifest has to change), or a call not following `private_ci` (the
+    /// repo has to change).
     pub visibility_problems: Vec<String>,
     /// Repo settings: top-level, then the tags', then the repo's own.
     pub settings: Map<String, Value>,
@@ -332,6 +340,7 @@ impl Manifest {
             workflow_refs: raw.workflows.into_iter().collect(),
             stale: raw.stale,
             private_rulesets: raw.private_rulesets,
+            private_ci: raw.private_ci,
             tags,
             pins: raw.pins.into_iter().map(|(f, p)| (f, p, None)).collect(),
         })
@@ -359,6 +368,11 @@ impl Manifest {
             .iter()
             .map(|(caller, uses)| read(caller, uses))
             .collect::<Result<_>>()?;
+        if let Some(input) = &self.private_ci
+            && !self.workflows.iter().any(|w| w.has_input(input))
+        {
+            bail!("private_ci = {input:?}, but no workflow in [workflows] has that input");
+        }
         Ok(())
     }
 
@@ -400,6 +414,15 @@ impl Manifest {
                 needs.visibility_problems.push(format!(
                     "public, so it can have {name}: add the {name} tag, or no-{name} to hide this"
                 ));
+            }
+        }
+        if let Some(input) = &self.private_ci {
+            for (workflow, call) in self.workflows.iter().zip(calls) {
+                if let Some(call) = call {
+                    needs
+                        .visibility_problems
+                        .extend(workflow.private_ci_problem(call, input, public));
+                }
             }
         }
 
@@ -566,6 +589,30 @@ mod tests {
 
         assert!(!default.private_rulesets);
         assert!(opted_in.private_rulesets);
+    }
+
+    #[test]
+    fn private_ci_names_an_input_some_workflow_has() {
+        let dir = std::env::temp_dir().join(format!("forge-private-ci-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("forge.toml");
+        let workflows =
+            "[workflows]\n\"ci.yml\" = \"lkurcak/forge/.github/workflows/rust-ci.yml@v1\"\n";
+        let load = |private_ci: &str| {
+            fs::write(&path, format!("owner = \"me\"\n{private_ci}{workflows}")).unwrap();
+            let mut manifest = Manifest::load(&path).unwrap();
+            manifest
+                .fetch_workflows(crate::workflow::local)
+                .map(|()| manifest)
+        };
+        let off = load("").unwrap();
+        let light = load("private_ci = \"light\"\n").unwrap();
+        let typo = load("private_ci = \"lite\"\n").map(|_| ()).unwrap_err();
+        fs::remove_dir_all(&dir).unwrap();
+
+        assert_eq!(off.private_ci, None);
+        assert_eq!(light.private_ci.as_deref(), Some("light"));
+        assert!(typo.to_string().contains("lite"), "{typo}");
     }
 
     #[test]

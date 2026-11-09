@@ -95,6 +95,11 @@ rulesets = ["protect-default-branch"]
   A `rulesets/NAME.json` next to the manifest adds a ruleset, or replaces a
   built-in one, with a body in the
   [REST API shape](https://docs.github.com/en/rest/repos/rules).
+- `private_ci = "INPUT"` names an input of the shared workflows that
+  private repos' calls must turn on and public ones' leave off, like
+  `rust-ci.yml`'s `light`: only private repos' Actions minutes are billed.
+  Off by default, so every repo runs full CI. Calls of a workflow without
+  that input aren't affected.
 - `release_tag_prefix`: the latest GitHub release of each repo must be
   tagged this plus `X.Y.Z`. A repo can set its own, or `releases = false` for
   releases that aren't versions of it (a Homebrew tap's bottles, say).

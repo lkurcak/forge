@@ -208,6 +208,30 @@ impl SharedWorkflow {
         problems
     }
 
+    pub fn has_input(&self, input: &str) -> bool {
+        self.inputs.iter().any(|i| i == input)
+    }
+
+    /// With `private_ci = "{input}"`, what's wrong with a call: a private
+    /// repo must turn the input on, a public one leave it off. Calls of a
+    /// workflow without the input are fine either way.
+    pub fn private_ci_problem(&self, call: &Call, input: &str, public: bool) -> Option<String> {
+        if !self.has_input(input) {
+            return None;
+        }
+        match (public, call.enabled().any(|i| i == input)) {
+            (false, false) => Some(format!(
+                "{}: private repo, so {} needs `{input}: true`",
+                self.caller, self.name
+            )),
+            (true, true) => Some(format!(
+                "{}: public repo, so {} shouldn't have `{input}: true`",
+                self.caller, self.name
+            )),
+            _ => None,
+        }
+    }
+
     /// Targets the call builds release archives for, in the workflow's order.
     pub fn targets(&self, call: &Call) -> Vec<String> {
         let mut targets: Vec<String> = Vec::new();
@@ -299,6 +323,35 @@ jobs:
         let call = CALL.replace("@v1", "@main").replace("winget:", "wignet:");
         let release = shared.parse_call(&call).unwrap().unwrap();
         assert_eq!(shared.problems(&release).len(), 2);
+    }
+
+    #[test]
+    fn private_ci_wants_the_input_on_private_repos_only() {
+        let ci = local("ci.yml", "lkurcak/forge/.github/workflows/rust-ci.yml@v1").unwrap();
+        let call = |with: &str| {
+            let text = format!(
+                "jobs:\n  ci:\n    uses: lkurcak/forge/.github/workflows/rust-ci.yml@v1\n{with}"
+            );
+            ci.parse_call(&text).unwrap().unwrap()
+        };
+        let light = call("    with:\n      light: true\n");
+        let full = call("    with:\n      light: false\n");
+        let plain = call("");
+
+        assert_eq!(ci.private_ci_problem(&light, "light", false), None);
+        assert_eq!(ci.private_ci_problem(&full, "light", true), None);
+        assert_eq!(ci.private_ci_problem(&plain, "light", true), None);
+        for (call, public) in [(&light, true), (&full, false), (&plain, false)] {
+            assert!(ci.private_ci_problem(call, "light", public).is_some());
+        }
+
+        let release = shared();
+        let release_call = release.parse_call(CALL).unwrap().unwrap();
+        assert!(!release.has_input("light"));
+        assert_eq!(
+            release.private_ci_problem(&release_call, "light", false),
+            None
+        );
     }
 
     #[test]
