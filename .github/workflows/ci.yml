@@ -13,4 +13,4 @@ permissions:
 
 jobs:
   ci:
-    uses: ./.github/workflows/rust-ci.yml
+    uses: lkurcak/forge/.github/workflows/rust-ci.yml@v1
