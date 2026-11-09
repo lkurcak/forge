@@ -7,6 +7,8 @@ use serde::Deserialize;
 use serde_json::{Map, Value};
 
 use crate::cargo::Lints;
+use crate::gh::Gh;
+use crate::pins::{Latest, Pin};
 use crate::workflow::{Call, Reference, SharedWorkflow};
 
 /// Rulesets anyone can use by name. A file of the same name in `rulesets/`
@@ -25,6 +27,7 @@ const BUILT_IN_RULESETS: &[(&str, &str)] = &[
         "protect-release-tags",
         include_str!("../rulesets/protect-release-tags.json"),
     ),
+    ("require-ci", include_str!("../rulesets/require-ci.json")),
 ];
 
 #[derive(Deserialize)]
@@ -48,6 +51,9 @@ struct RawManifest {
     repos: BTreeMap<String, RawRepo>,
     #[serde(default)]
     stale: Stale,
+    /// Workflow file to the inputs in it that pin another repo's release.
+    #[serde(default)]
+    pins: BTreeMap<String, Pin>,
 }
 
 /// `[stale]`: what `forge stale` leaves out.
@@ -134,6 +140,9 @@ pub struct Manifest {
     workflow_refs: Vec<(String, String)>,
     pub stale: Stale,
     tags: BTreeMap<String, Tag>,
+    /// `[pins]`, by workflow file, with the release each should name once
+    /// [`Self::fetch_pins`] has looked it up.
+    pub pins: Vec<(String, Pin, Option<Latest>)>,
 }
 
 /// A repository with the manifest defaults already merged in.
@@ -317,7 +326,19 @@ impl Manifest {
             workflow_refs: raw.workflows.into_iter().collect(),
             stale: raw.stale,
             tags,
+            pins: raw.pins.into_iter().map(|(f, p)| (f, p, None)).collect(),
         })
+    }
+
+    /// Looks up the latest release each pin should name.
+    pub fn fetch_pins(&mut self, gh: &Gh) -> Result<()> {
+        for (file, pin, latest) in &mut self.pins {
+            *latest = Some(
+                pin.latest(gh)
+                    .with_context(|| format!("reading the release [pins.\"{file}\"] names"))?,
+            );
+        }
+        Ok(())
     }
 
     /// Reads each shared workflow in `[workflows]` with `read`, given the

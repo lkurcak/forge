@@ -36,6 +36,9 @@ pub struct Outcome {
     pub manual: Vec<String>,
     /// Things on their way to being right, like a release waiting on review.
     pub pending: Vec<String>,
+    /// Pins of another repo's release that are behind it (`[pins]`), which
+    /// `forge bump` opens PRs for.
+    pub behind: Vec<String>,
 }
 
 /// Compares one repository against the manifest and, in apply mode, fixes it.
@@ -59,6 +62,16 @@ pub fn reconcile(gh: &Gh, manifest: &Manifest, repo: &Repo, mode: Mode) -> Outco
             outcome.manual.extend(workflow.problems(call));
         }
         calls.push(call);
+    }
+    for (file, pin, latest) in &manifest.pins {
+        let Some(latest) = latest else { continue };
+        match crate::pins::behind(gh, owner, &repo.name, file, pin, latest) {
+            Ok(Some(b)) => outcome
+                .behind
+                .push(crate::pins::describe(file, pin, &b.pinned, latest)),
+            Ok(None) => {}
+            Err(err) => outcome.errors.push(format!("{file}: {err:#}")),
+        }
     }
     // Everything below needs to know whether the repo is public.
     let actual = match gh.get(&base) {

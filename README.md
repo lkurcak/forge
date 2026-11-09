@@ -49,6 +49,7 @@ forge check [REPO…]         # report drift; exits 1 if anything differs
 forge apply [REPO…]         # fix drift
 forge list                  # managed repos, and owned ones the manifest doesn't cover
 forge stale [--days 90]     # open issues and PRs nobody has touched in that long
+forge bump [--dry-run] [REPO…]  # open PRs moving [pins] to the latest release
 forge init [--owner NAME]   # write a starter manifest
 ```
 
@@ -158,8 +159,47 @@ moves along with compatible changes:
 
 Each file's header shows how to call it, and its inputs say what they do.
 
+### Pins
+
+A shared workflow's inputs can pin a release of another repo, like a T
+repo's `t-version` and the sha256 of its archive. `[pins]` says which, by
+the file the call is in:
+
+```toml
+[pins."t.yml"]
+release = "lkurcak/t-lang"   # whose latest release the inputs should name
+version = "t-version"        # the input holding its tag
+sha256 = "t-sha256"          # the input holding an asset's sha256, if any,
+asset = "t-lang-{tag}-x86_64-unknown-linux-gnu.tar.gz"   # of this asset
+```
+
+`forge check` reports a repo whose pin is behind that repo's latest release.
+`forge bump` opens a PR in each such repo moving the inputs there (the
+sha256 from the digest GitHub keeps of the asset), and turns on auto-merge,
+so it merges itself once the repo's required checks pass: give those repos
+the `require-ci` ruleset and `allow_auto_merge`.
+
+### Merging on green
+
+The `require-ci` ruleset requires the check `ci / ok`, which `rust-ci.yml`
+and `t-ci.yml` end with: it passes only if every other job of theirs passed
+or was skipped, whichever ones a repo's inputs turn on. So call them from a
+job named `ci`. With it, and the `allow_auto_merge` setting, `gh pr merge
+--auto` merges a PR once all of CI is green. Rulesets need GitHub Pro on
+private repos, which forge skips, so this is for public ones.
+
+### Releasing a version bump
+
+`rust-release.yml` releases on a `vX.Y.Z` tag push. A repo that also calls
+it on pushes to its default branch (see the file's header) has every
+version bump released when it lands: if Cargo.toml's version has no tag
+yet, the workflow tags the pushed commit and runs again on the tag. Only a
+tag may deploy to the `release` environment, so crates.io and Homebrew are
+still only published from tags.
+
 ### Also reported
 
+- A `[pins]` input behind the release it pins (`forge bump` opens PRs).
 - A latest release whose tag doesn't match `release_tag_prefix`, that lacks
   one of the archives its release workflow builds, or that hasn't reached
   crates.io, the Homebrew formula or winget-pkgs. An open PR delivering it
