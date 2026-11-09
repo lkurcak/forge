@@ -9,9 +9,9 @@ use std::cmp::Ordering;
 
 use anyhow::{Context, Result, bail};
 use serde::Deserialize;
-use serde_json::{Value, json};
+use serde_json::Value;
 
-use crate::gh::Gh;
+use crate::gh::{Gh, NewPr};
 
 /// What stands for the release's tag in a pin's `asset`.
 const TAG: &str = "{tag}";
@@ -186,10 +186,7 @@ pub fn bump(gh: &Gh, owner: &str, pin: &Pin, b: &Behind) -> Result<Option<String
     let repo = format!("{owner}/{}", b.repo);
     let path = format!(".github/workflows/{}", b.file);
     let branch = format!("forge/{}-{}", pin.version, b.latest.tag);
-    let open = gh.get(&format!(
-        "repos/{repo}/pulls?state=open&head={owner}:{branch}"
-    ))?;
-    if open.as_array().is_some_and(|prs| !prs.is_empty()) {
+    if gh.open_pr_from(&repo, &branch)?.is_some() {
         return Ok(None);
     }
 
@@ -211,46 +208,23 @@ pub fn bump(gh: &Gh, owner: &str, pin: &Pin, b: &Behind) -> Result<Option<String
         new = rewrite(&new, input, &old, sha)?;
     }
 
-    // One commit on a new branch, through the git data API, which takes the
-    // file as text.
     let name = pin.release.rsplit('/').next().unwrap_or(&pin.release);
     let title = format!("chore: {name} {}", b.latest.tag);
-    let blob = gh.api(
-        "POST",
-        &format!("repos/{repo}/git/blobs"),
-        Some(&json!({ "content": new, "encoding": "utf-8" })),
-    )?;
-    let tree = gh.get(&format!("repos/{repo}/git/commits/{head}"))?["tree"]["sha"].clone();
-    let tree = gh.api(
-        "POST",
-        &format!("repos/{repo}/git/trees"),
-        Some(&json!({
-            "base_tree": tree,
-            "tree": [{ "path": path, "mode": "100644", "type": "blob", "sha": blob["sha"] }],
-        })),
-    )?;
-    let commit = gh.api(
-        "POST",
-        &format!("repos/{repo}/git/commits"),
-        Some(&json!({ "message": title, "tree": tree["sha"], "parents": [head] })),
-    )?;
-    gh.api(
-        "POST",
-        &format!("repos/{repo}/git/refs"),
-        Some(&json!({ "ref": format!("refs/heads/{branch}"), "sha": commit["sha"] })),
-    )?;
     let body = format!(
         "Moves `{}` to [{tag}](https://github.com/{rel}/releases/tag/{tag}), {rel}'s latest release.\n\nOpened by `forge bump`; it merges itself once the required checks pass.",
         pin.version,
         tag = b.latest.tag,
         rel = pin.release,
     );
-    let pr = gh.api(
-        "POST",
-        &format!("repos/{repo}/pulls"),
-        Some(&json!({ "title": title, "head": branch, "base": base, "body": body })),
-    )?;
-    let url = pr["html_url"].as_str().context("no PR URL")?.to_owned();
+    let url = gh.open_pr(&NewPr {
+        repo: &repo,
+        base: &base,
+        parent: &head,
+        branch: &branch,
+        files: &[(&path, &new)],
+        title: &title,
+        body: &body,
+    })?;
     gh.auto_merge(&url)?;
     Ok(Some(url))
 }

@@ -12,6 +12,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `private_ci = "light"` in the manifest has `forge check` report a private
   repo calling `rust-ci.yml` without `light: true`, and a public one calling
   it with it. Any input of the shared workflows can be named that way.
+- `forge deps`: one PR per Rust repo moving Cargo.lock to the newest
+  versions its Cargo.toml allows, opened only after clippy and the tests
+  pass on your machine, with auto-merge where the repo allows it. It also
+  lists the newer versions Cargo.toml holds back. Tags in
+  `[deps] alerts_only` leave quiet repos alone until Dependabot raises an
+  alert.
 
 ### Changed
 

@@ -1,6 +1,7 @@
 mod cargo;
 mod days;
 mod dependabot;
+mod deps;
 mod diff;
 mod docker;
 mod gh;
@@ -78,6 +79,21 @@ enum Command {
         #[arg(long)]
         dry_run: bool,
     },
+    /// Update each Rust repo's Cargo.lock to the newest versions its
+    /// Cargo.toml allows, and open a PR with it once clippy and the tests
+    /// pass on this machine.
+    ///
+    /// Repos are cloned into forge's cache directory, and kept there with
+    /// their build cache for the next run.
+    Deps {
+        /// Repositories to update (default: every managed one with a
+        /// Cargo.lock, but those with a `[deps] alerts_only` tag only while
+        /// they have open Dependabot alerts).
+        repos: Vec<String>,
+        /// Update and run the checks, but open no PRs.
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// List open issues and PRs in any owned repo that have gone quiet.
     Stale {
         /// Days without activity before one counts as quiet.
@@ -120,6 +136,20 @@ fn run() -> Result<ExitCode> {
         Command::List => list(&gh, &manifest),
         Command::Stale { days } => stale(&gh, &manifest, days),
         Command::Bump { repos, dry_run } => bump(&gh, &manifest, &repos, dry_run),
+        Command::Deps { repos, dry_run } => {
+            let cache = cache_dir()
+                .context("no cache directory: set XDG_CACHE_HOME or HOME")?
+                .join("forge");
+            let selected = select(&manifest, &repos)?;
+            Ok(deps::run(
+                &gh,
+                &manifest,
+                &selected,
+                !repos.is_empty(),
+                dry_run,
+                &cache,
+            ))
+        }
         Command::Init { .. } => unreachable!("handled before loading a manifest"),
     }
 }
@@ -153,6 +183,15 @@ fn config_dir() -> Option<PathBuf> {
         .map(PathBuf::from)
         .or_else(|| var("HOME").map(|home| Path::new(&home).join(".config")))
         .or_else(|| var("APPDATA").map(PathBuf::from))
+}
+
+/// `$XDG_CACHE_HOME`, else `~/.cache`, else (on Windows) `%LOCALAPPDATA%`.
+fn cache_dir() -> Option<PathBuf> {
+    let var = |name| std::env::var_os(name).filter(|v| !v.is_empty());
+    var("XDG_CACHE_HOME")
+        .map(PathBuf::from)
+        .or_else(|| var("HOME").map(|home| Path::new(&home).join(".cache")))
+        .or_else(|| var("LOCALAPPDATA").map(PathBuf::from))
 }
 
 /// How many repositories to work on at once.
