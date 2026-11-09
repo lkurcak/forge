@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- `rust-ci.yml` with `light` keeps the Rust build cache from the default
+  branch only, so pull requests no longer spend time uploading caches that
+  nothing reads again.
+- `t-ci.yml` is a single job, `ok`, instead of a test job and a separate
+  `ok` job waiting on it: one billed job a run instead of two.
+
 ## [0.3.0] - 2026-11-09
 
 ### Added

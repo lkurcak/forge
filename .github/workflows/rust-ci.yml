@@ -62,7 +62,7 @@ name: Rust CI
 # linux/arm64); the pull request already checked what landed. Every job is
 # billed at least a minute, and the full set runs up to a dozen per push.
 # The weekly run, on the default branch, also leaves a build cache there for
-# pull requests to start from.
+# pull requests to start from; it's the only run that saves one.
 #
 # Image layers are cached between runs, so the Dockerfile compiles the
 # dependencies in a layer of their own with cargo-chef (forge's `container`
@@ -459,8 +459,15 @@ jobs:
           sudo apt-get update && sudo apt-get install -y --no-install-recommends $BEVY_LINUX_PACKAGES
       - if: inputs.light
         run: cargo fmt --all --check
+      # Pull requests start from the default branch's cache, and a pull
+      # request's own is rarely read again (most get one run), so light
+      # saves it from the weekly and manual runs alone: quicker pull
+      # requests, and their caches don't crowd the image layers out of the
+      # repo's 10 GB.
       - if: inputs.light
         uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.event_name != 'pull_request' }}
       - if: inputs.light
         run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
       - if: inputs.light && inputs.tests

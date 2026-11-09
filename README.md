@@ -187,10 +187,10 @@ the `require-ci` ruleset and `allow_auto_merge`.
 
 ### Merging on green
 
-The `require-ci` ruleset requires the check `ci / ok`, which `rust-ci.yml`
-and `t-ci.yml` end with: it passes only if every other job of theirs passed
-or was skipped, whichever ones a repo's inputs turn on. So call them from a
-job named `ci`. With it, and the `allow_auto_merge` setting, `gh pr merge
+The `require-ci` ruleset requires the check `ci / ok`. `rust-ci.yml` ends
+with it: it passes only if every other job passed or was skipped, whichever
+ones a repo's inputs turn on. `t-ci.yml` is that one job. So call them from
+a job named `ci`. With it, and the `allow_auto_merge` setting, `gh pr merge
 --auto` merges a PR once all of CI is green. On private repos it needs
 `private_rulesets = true`, and so GitHub Pro.
 
