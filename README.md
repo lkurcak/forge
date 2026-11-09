@@ -80,8 +80,11 @@ rulesets = ["protect-default-branch"]
   `rulesets` wholesale.
 - `[settings]` goes to `PATCH /repos/{owner}/{repo}`, so any key that
   endpoint takes works. `vulnerability_alerts = true` also turns on
-  Dependabot alerts, which have an endpoint of their own; unlike secret
-  scanning, they're free on private repos too.
+  Dependabot alerts, and
+  `security_and_analysis.dependabot_security_updates = { status = "enabled" }`
+  its PRs fixing them. Both are read and set through endpoints of their
+  own, and unlike secret scanning they're free on private repos too
+  (though the PRs' CI isn't).
 - `[actions]` goes to `/actions/permissions` (whether Actions run and which
   actions may), `[actions.workflow]` to `/actions/permissions/workflow` (the
   `GITHUB_TOKEN`'s defaults), and `[actions.selected-actions]` to the

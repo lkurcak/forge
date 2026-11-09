@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-11-09
+
+### Fixed
+
+- `security_and_analysis.dependabot_security_updates` works on private
+  repos: forge reads it from `/automated-security-fixes`, since private repos
+  don't report `security_and_analysis`. It used to show as drift there
+  forever, even after `forge apply` turned the updates on.
+
 ## [0.5.0] - 2026-11-09
 
 ### Added
@@ -109,7 +118,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Prebuilt binaries for Windows, macOS and Linux are attached to each
   [GitHub release](https://github.com/lkurcak/forge/releases).
 
-[Unreleased]: https://github.com/lkurcak/forge/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/lkurcak/forge/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/lkurcak/forge/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/lkurcak/forge/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/lkurcak/forge/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/lkurcak/forge/compare/v0.2.0...v0.3.0

@@ -199,7 +199,7 @@ fn files_drift(gh: &Gh, repo: &str, needs: &Needs, outcome: &mut Outcome) {
 /// Settings for `PATCH /repos/{owner}/{repo}`. `security_and_analysis` goes
 /// in a request of its own: GitHub ignores it when other settings change in
 /// the same one. Its `dependabot_security_updates` is ignored even there, so
-/// it goes through `/automated-security-fixes`. `vulnerability_alerts`
+/// it's read and set through `/automated-security-fixes`. `vulnerability_alerts`
 /// (Dependabot alerts) isn't a setting GitHub reports at all; it has an
 /// endpoint of its own.
 fn settings_drift(
@@ -222,29 +222,48 @@ fn settings_drift(
             .as_object_mut()
             .and_then(|s| s.remove("dependabot_security_updates"));
         if let Some(updates) = updates {
-            let expected = Map::from_iter([(
-                "security_and_analysis".into(),
-                json!({ "dependabot_security_updates": updates }),
-            )]);
-            let found = object_drift(gh, Mode::Check, "settings", &expected, actual, "", "")?;
-            if mode.applies() && !found.is_empty() {
-                let fixes = format!("{base}/automated-security-fixes");
-                if updates["status"] == "enabled" {
-                    // They act on Dependabot alerts, which must be on first.
-                    gh.api("PUT", &format!("{base}/vulnerability-alerts"), None)?;
-                    gh.api("PUT", &fixes, None)?;
-                } else {
-                    gh.api("DELETE", &fixes, None)?;
-                }
-            }
-            drift.extend(found);
+            drift.extend(security_updates_drift(gh, mode, base, &updates)?);
         }
-        let security = Map::from_iter([("security_and_analysis".into(), security)]);
-        drift.extend(object_drift(
-            gh, mode, "settings", &security, actual, "PATCH", base,
-        )?);
+        // Private repos without GitHub Advanced Security report no
+        // security_and_analysis at all, so an empty table isn't drift.
+        if security.as_object().is_some_and(|s| !s.is_empty()) {
+            let security = Map::from_iter([("security_and_analysis".into(), security)]);
+            drift.extend(object_drift(
+                gh, mode, "settings", &security, actual, "PATCH", base,
+            )?);
+        }
     }
     Ok(drift)
+}
+
+/// Dependabot security updates, its PRs fixing what alerts find. Read from
+/// their own endpoint: private repos don't report `security_and_analysis`.
+fn security_updates_drift(gh: &Gh, mode: Mode, base: &str, wanted: &Value) -> Result<Vec<String>> {
+    let wanted = wanted["status"]
+        .as_str()
+        .context("settings.security_and_analysis.dependabot_security_updates needs a status")?;
+    let fixes = format!("{base}/automated-security-fixes");
+    let on = match gh.get(&fixes) {
+        Ok(state) => state["enabled"] == true,
+        Err(err) if err.to_string().contains("(HTTP 404)") => false,
+        Err(err) => return Err(err),
+    };
+    let found = if on { "enabled" } else { "disabled" };
+    if found == wanted {
+        return Ok(Vec::new());
+    }
+    if mode.applies() {
+        if wanted == "enabled" {
+            // They act on Dependabot alerts, which must be on first.
+            gh.api("PUT", &format!("{base}/vulnerability-alerts"), None)?;
+            gh.api("PUT", &fixes, None)?;
+        } else {
+            gh.api("DELETE", &fixes, None)?;
+        }
+    }
+    Ok(vec![format!(
+        "settings.security_and_analysis.dependabot_security_updates: expected {wanted}, found {found}"
+    )])
 }
 
 /// Dependabot alerts, on or off. Their endpoint answers 204 when they're on
