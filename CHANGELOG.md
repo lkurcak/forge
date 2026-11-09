@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-09
+
 ### Added
 
 - `private_ci = "light"` in the manifest has `forge check` report a private
@@ -93,7 +95,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Prebuilt binaries for Windows, macOS and Linux are attached to each
   [GitHub release](https://github.com/lkurcak/forge/releases).
 
-[Unreleased]: https://github.com/lkurcak/forge/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/lkurcak/forge/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/lkurcak/forge/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/lkurcak/forge/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/lkurcak/forge/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/lkurcak/forge/compare/v0.1.0...v0.1.1
