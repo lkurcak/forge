@@ -163,7 +163,7 @@ moves along with compatible changes:
   whose Actions minutes are billed (private ones), it's a sanity check: one
   Linux job on pull requests (fmt, clippy and, unless `tests: false`, the
   tests), and on pushes only the image, for linux/amd64 unless
-  `arm64: true`.
+  `arm64: true`. Pull requests from `forge deps` skip even that one job.
 - [`rust-release.yml`](.github/workflows/rust-release.yml): on a `vX.Y.Z`
   tag, publishes to crates.io through trusted publishing, attaches binaries
   to the GitHub release, and bumps the formula in `{owner}/homebrew-tap` and
@@ -209,6 +209,13 @@ repo allows auto-merge, it's turned on. Newer versions Cargo.toml doesn't
 allow are listed too, since taking them means editing it. `--dry-run` stops
 before the PR. A repo whose PR from an earlier run is still open is left
 alone.
+
+The PR's commit carries a `forge/deps` status saying what passed. Since the
+PR changes nothing but Cargo.lock, `rust-ci.yml` with `light: true` doesn't
+run its checks again on it (unless `no-std: true`, whose build forge
+doesn't run), so on a private repo the PR costs no Actions minutes. Its
+`ci / ok` shows as skipped, so a ruleset requiring that check would block
+the PR; private repos have none unless `private_rulesets` is set.
 
 It takes the place of Dependabot's version updates, which open a PR per
 crate, each running CI on minutes a private repo pays for. Dependabot's

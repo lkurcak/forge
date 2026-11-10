@@ -224,6 +224,7 @@ pub fn bump(gh: &Gh, owner: &str, pin: &Pin, b: &Behind) -> Result<Option<String
         files: &[(&path, &new)],
         title: &title,
         body: &body,
+        status: None,
     })?;
     gh.auto_merge(&url)?;
     Ok(Some(url))
