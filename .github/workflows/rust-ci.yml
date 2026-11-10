@@ -64,6 +64,12 @@ name: Rust CI
 # The weekly run, on the default branch, also leaves a build cache there for
 # pull requests to start from; it's the only run that saves one.
 #
+# A pull request from `forge deps` (branch forge/deps) runs nothing either,
+# unless the repo is no-std: it only touches Cargo.lock, and forge ran clippy
+# and the tests on it before opening it, which its forge/deps status says.
+# This leaves `ci / ok` skipped, which only works without a ruleset
+# requiring it, as on private repos without private_rulesets.
+#
 # Image layers are cached between runs, so the Dockerfile compiles the
 # dependencies in a layer of their own with cargo-chef (forge's `container`
 # tag checks for it). That layer only rebuilds when Cargo.toml, Cargo.lock or
@@ -122,9 +128,10 @@ on:
       light:
         description: >-
           Keep CI to a sanity check, for repos whose Actions minutes are
-          billed: one Linux job (fmt, clippy, tests) on pull requests,
-          scheduled and manual runs, and on pushes only the container
-          image, for linux/amd64 alone unless arm64 is set. See the header.
+          billed: one Linux job (fmt, clippy, tests) on pull requests
+          (but not forge deps' own), scheduled and manual runs, and on
+          pushes only the container image, for linux/amd64 alone unless
+          arm64 is set. See the header.
         type: boolean
         default: false
       tests:
@@ -426,11 +433,13 @@ jobs:
   # One check that passes only if every job above passed or was skipped:
   # what a ruleset requires (require-ci, "ci / ok"), so a PR's auto-merge
   # waits for all of CI, whichever jobs a repo's inputs turn on. With light,
-  # it's the one job, and does the checking itself.
+  # it's the one job, and does the checking itself, except on forge deps'
+  # pull requests (head_ref is empty outside pull requests).
   ok:
     if: >-
       ${{ !inputs.light && always()
-      || inputs.light && !cancelled() && github.event_name != 'push' }}
+      || inputs.light && !cancelled() && github.event_name != 'push'
+      && (github.head_ref != 'forge/deps' || inputs.no-std) }}
     needs: [fmt, clippy, test, doc, package, msrv, no-std, version, container, container-publish]
     permissions:
       contents: read

@@ -20,7 +20,7 @@ use serde::Deserialize;
 use serde_json::Value;
 use toml::Table;
 
-use crate::gh::{Gh, NewPr};
+use crate::gh::{Gh, NewPr, Status};
 use crate::manifest::{Manifest, Repo};
 use crate::progress::Progress;
 
@@ -42,6 +42,13 @@ const CHECKS: [&[&str]; 2] = [
     ],
     &["test", "--workspace", "--all-features", "--locked"],
 ];
+
+/// The commit status the PR's commit gets, saying what passed here. Light
+/// `rust-ci.yml` skips PRs from [`BRANCH`] on the strength of it.
+const STATUS: Status = Status {
+    context: "forge/deps",
+    description: "Passed locally: cargo clippy -D warnings, cargo test (all features)",
+};
 
 /// `[deps]`: which repos `forge deps` leaves alone.
 #[derive(Default, Deserialize)]
@@ -253,6 +260,7 @@ fn update(
         files: &[("Cargo.lock", &after)],
         title: TITLE,
         body: &body(&update),
+        status: Some(STATUS),
     })?;
     if target.auto_merge {
         gh.auto_merge(&url)

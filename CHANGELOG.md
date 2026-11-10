@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-10
+
+### Added
+
+- `forge deps` marks its PR's commit with a `forge/deps` status saying
+  clippy and the tests passed locally, and `rust-ci.yml` with `light: true`
+  skips CI on that PR instead of running the same checks again, so the
+  update costs a private repo no Actions minutes.
+
 ## [0.5.1] - 2026-11-09
 
 ### Fixed
@@ -118,7 +127,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Prebuilt binaries for Windows, macOS and Linux are attached to each
   [GitHub release](https://github.com/lkurcak/forge/releases).
 
-[Unreleased]: https://github.com/lkurcak/forge/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/lkurcak/forge/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/lkurcak/forge/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/lkurcak/forge/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/lkurcak/forge/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/lkurcak/forge/compare/v0.3.0...v0.4.0

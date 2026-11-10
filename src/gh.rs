@@ -28,6 +28,16 @@ pub struct NewPr<'a> {
     /// Also the commit's message.
     pub title: &'a str,
     pub body: &'a str,
+    /// A commit status to set on the commit before the PR opens, for checks
+    /// that passed somewhere other than CI.
+    pub status: Option<Status<'a>>,
+}
+
+/// A successful commit status: what passed, under what name.
+pub struct Status<'a> {
+    /// The name the PR's checks list it under, like `forge/deps`.
+    pub context: &'a str,
+    pub description: &'a str,
 }
 
 /// Calls the GitHub API through the `gh` CLI, as a specific account.
@@ -132,9 +142,9 @@ impl Gh {
     }
 
     /// Commits `pr.files` on top of `pr.parent` through the git data API,
-    /// which takes files as text, to `pr.branch`, and opens the PR. A branch
-    /// of that name left from a PR closed unmerged is moved. Gives the PR's
-    /// URL.
+    /// which takes files as text, sets `pr.status` on the commit, puts it on
+    /// `pr.branch`, and opens the PR. A branch of that name left from a PR
+    /// closed unmerged is moved. Gives the PR's URL.
     pub fn open_pr(&self, pr: &NewPr) -> Result<String> {
         let repo = pr.repo;
         let mut files = Vec::new();
@@ -159,17 +169,29 @@ impl Gh {
             &format!("repos/{repo}/git/commits"),
             Some(&json!({ "message": pr.title, "tree": tree["sha"], "parents": [pr.parent] })),
         )?;
+        let sha = commit["sha"].as_str().context("no commit SHA")?;
+        if let Some(status) = &pr.status {
+            self.api(
+                "POST",
+                &format!("repos/{repo}/statuses/{sha}"),
+                Some(&json!({
+                    "state": "success",
+                    "context": status.context,
+                    "description": status.description,
+                })),
+            )?;
+        }
         let created = self.api(
             "POST",
             &format!("repos/{repo}/git/refs"),
-            Some(&json!({ "ref": format!("refs/heads/{}", pr.branch), "sha": commit["sha"] })),
+            Some(&json!({ "ref": format!("refs/heads/{}", pr.branch), "sha": sha })),
         );
         match created {
             Err(err) if err.to_string().contains("Reference already exists") => {
                 self.api(
                     "PATCH",
                     &format!("repos/{repo}/git/refs/heads/{}", pr.branch),
-                    Some(&json!({ "sha": commit["sha"], "force": true })),
+                    Some(&json!({ "sha": sha, "force": true })),
                 )?;
             }
             result => {
