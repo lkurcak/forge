@@ -9,6 +9,7 @@ use serde_json::{Map, Value};
 use crate::cargo::Lints;
 use crate::deps::Deps;
 use crate::gh::Gh;
+use crate::leaks::Leaks;
 use crate::pins::{Latest, Pin};
 use crate::workflow::{Call, Reference, SharedWorkflow};
 
@@ -62,6 +63,8 @@ struct RawManifest {
     stale: Stale,
     #[serde(default)]
     deps: Deps,
+    #[serde(default)]
+    leaks: Leaks,
     /// Workflow file to the inputs in it that pin another repo's release.
     #[serde(default)]
     pins: BTreeMap<String, Pin>,
@@ -151,6 +154,7 @@ pub struct Manifest {
     workflow_refs: Vec<(String, String)>,
     pub stale: Stale,
     pub deps: Deps,
+    pub leaks: Leaks,
     /// Whether private repos get their rulesets (`private_rulesets`).
     pub private_rulesets: bool,
     /// The input private repos' calls must turn on (`private_ci`).
@@ -344,6 +348,7 @@ impl Manifest {
             workflow_refs: raw.workflows.into_iter().collect(),
             stale: raw.stale,
             deps: raw.deps,
+            leaks: raw.leaks,
             private_rulesets: raw.private_rulesets,
             private_ci: raw.private_ci,
             tags,

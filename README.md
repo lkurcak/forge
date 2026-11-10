@@ -51,6 +51,7 @@ forge list                  # managed repos, and owned ones the manifest doesn't
 forge stale [--days 90]     # open issues and PRs nobody has touched in that long
 forge bump [--dry-run] [REPO…]  # open PRs moving [pins] to the latest release
 forge deps [--dry-run] [REPO…]  # a PR per Rust repo updating Cargo.lock, tested here first
+forge leaks [--public] [--full] [REPO…]  # secrets committed to private repos
 forge init [--owner NAME]   # write a starter manifest
 ```
 
@@ -235,6 +236,32 @@ alerts_only = ["maintenance"]
 
 Repos with a tag in `alerts_only` are only updated while they have open
 Dependabot alerts about Rust crates, unless named on the command line.
+
+### Committed secrets
+
+GitHub's secret scanning and push protection cover public repos, but not a
+user's private ones. `forge leaks` scans those with
+[gitleaks](https://github.com/gitleaks/gitleaks#installing), which has to be
+installed: every private repo the owner has, managed or not (forks and
+archived ones aside), or the repos named, and with `--public` the public
+ones too. It reports where each possible secret is (the rule it matched,
+when it was committed, and a link to the line) but never the secret, and
+exits 1 if it found any. It changes nothing: a secret that made it into a
+repo's history is in every clone, so revoke it where it was issued.
+
+Every commit a branch, tag or PR reaches is scanned, since a PR's commits
+stay on GitHub after its branch is gone. Repos are fetched into bare clones
+under `forge/leaks/OWNER` in the cache directory; the first run scans all
+their history, later ones only new commits, and what was found is reported
+again on every run. `--full` forgets that and scans all history again.
+
+Each finding has an id. Once its secret is revoked, or if it isn't one,
+list the id to stop reporting it:
+
+```toml
+[leaks]
+ignore = ["home-server:2f1c…:docker/.env:generic-api-key:12"]
+```
 
 ### Merging on green
 
