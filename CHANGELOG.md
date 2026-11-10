@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-11-10
+
+### Changed
+
+- `private_rulesets` is now `private_protection`, and covers environments
+  too: like rulesets, their deployment rules need GitHub Pro on private
+  repos, so without the key forge skips a private repo's environments
+  instead of reporting a tag-only rule as in place when the plan may have
+  lapsed. Rename the key in your manifest if you set it.
+
 ## [0.7.0] - 2026-11-10
 
 ### Added
@@ -139,7 +149,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Prebuilt binaries for Windows, macOS and Linux are attached to each
   [GitHub release](https://github.com/lkurcak/forge/releases).
 
-[Unreleased]: https://github.com/lkurcak/forge/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/lkurcak/forge/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/lkurcak/forge/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/lkurcak/forge/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/lkurcak/forge/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/lkurcak/forge/compare/v0.5.0...v0.5.1

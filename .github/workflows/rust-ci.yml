@@ -68,7 +68,7 @@ name: Rust CI
 # unless the repo is no-std: it only touches Cargo.lock, and forge ran clippy
 # and the tests on it before opening it, which its forge/deps status says.
 # This leaves `ci / ok` skipped, which only works without a ruleset
-# requiring it, as on private repos without private_rulesets.
+# requiring it, as on private repos without private_protection.
 #
 # Image layers are cached between runs, so the Dockerfile compiles the
 # dependencies in a layer of their own with cargo-chef (forge's `container`

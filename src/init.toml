@@ -15,6 +15,10 @@ release_tag_prefix = "v"
 # `light: true`, and a public one calling it with it.
 # private_ci = "light"
 
+# Rulesets, and environments' deployment rules, need GitHub Pro on private
+# repos, so forge leaves both out there unless this is uncommented.
+# private_protection = true
+
 # Repo settings, as in PATCH /repos/{owner}/{repo}. These make PRs
 # squash-only, with the PR's title and description as the commit message.
 [settings]
@@ -61,7 +65,8 @@ rulesets = ["require-pr", "require-pr-title"]
 
 # Published versions can't move: release tags can't be moved or deleted, and
 # only they may deploy to the release environment (crates.io's trusted
-# publisher is configured for it).
+# publisher is configured for it). On private repos, only with
+# private_protection.
 [tags.rust-release]
 rulesets = ["protect-release-tags"]
 

@@ -91,7 +91,7 @@ rulesets = ["protect-default-branch"]
   `GITHUB_TOKEN`'s defaults), and `[actions.selected-actions]` to the
   allowlist, checked while `allowed_actions` is `selected`.
 - `rulesets = [...]` names rulesets, applied as repository rulesets. Private
-  repos only get theirs with `private_rulesets = true` at the top level,
+  repos only get theirs with `private_protection = true` at the top level,
   since rulesets there need GitHub Pro (or Team, for an organization): the
   plan can lapse without the manifest changing. Built in:
   - `protect-default-branch`: no deleting or force-pushing the default branch
@@ -125,7 +125,8 @@ without a table is just a label. A tag can carry:
   `forbidden_secrets = [...]` must not exist;
 - `[tags.NAME.environments.ENV]`, a deployment environment that must exist.
   `deploy_tags = [...]` lets only those tag patterns deploy to it, and no
-  branch;
+  branch. Like rulesets, private repos only get theirs with
+  `private_protection = true`, since that rule needs GitHub Pro there too;
 - `calls = [...]`, shared workflows the repo must call (see below). A repo
   declines one with the `no-WORKFLOW` tag;
 - `needs_public = true`, for features GitHub only offers public repos. Every
@@ -174,7 +175,7 @@ moves along with compatible changes:
   [Conventional Commits](https://www.conventionalcommits.org/). Private
   repos skip it, since their minutes are billed. A skipped check counts as
   passed, so forge leaves the `require-pr-title` ruleset out on private
-  repos, even with `private_rulesets = true`.
+  repos, even with `private_protection = true`.
 - [`t-ci.yml`](.github/workflows/t-ci.yml): checks repos written in
   [T](https://github.com/lkurcak/t-lang).
 
@@ -216,7 +217,7 @@ PR changes nothing but Cargo.lock, `rust-ci.yml` with `light: true` doesn't
 run its checks again on it (unless `no-std: true`, whose build forge
 doesn't run), so on a private repo the PR costs no Actions minutes. Its
 `ci / ok` shows as skipped, so a ruleset requiring that check would block
-the PR; private repos have none unless `private_rulesets` is set.
+the PR; private repos have none unless `private_protection` is set.
 
 It takes the place of Dependabot's version updates, which open a PR per
 crate, each running CI on minutes a private repo pays for. Dependabot's
@@ -270,7 +271,7 @@ with it: it passes only if every other job passed or was skipped, whichever
 ones a repo's inputs turn on. `t-ci.yml` is that one job. So call them from
 a job named `ci`. With it, and the `allow_auto_merge` setting, `gh pr merge
 --auto` merges a PR once all of CI is green. On private repos it needs
-`private_rulesets = true`, and so GitHub Pro.
+`private_protection = true`, and so GitHub Pro.
 
 ### Releasing a version bump
 
@@ -279,7 +280,8 @@ it on pushes to its default branch (see the file's header) has every
 version bump released when it lands: if Cargo.toml's version has no tag
 yet, the workflow tags the pushed commit and runs again on the tag. Only a
 tag may deploy to the `release` environment, so crates.io and Homebrew are
-still only published from tags.
+still only published from tags. On a private repo, that rule needs
+`private_protection = true`.
 
 ### Also reported
 
