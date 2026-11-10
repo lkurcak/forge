@@ -106,7 +106,8 @@ pub fn reconcile(gh: &Gh, manifest: &Manifest, repo: &Repo, mode: Mode) -> Outco
 
     actions_drift(gh, mode, &base, &repo.actions, &mut outcome);
 
-    if public || manifest.private_rulesets {
+    let protected = public || manifest.private_protection;
+    if protected {
         let mut rulesets = needs.rulesets.clone();
         if !public && rulesets.iter().any(|r| r.name == PR_TITLE_RULESET) {
             rulesets.retain(|r| r.name != PR_TITLE_RULESET);
@@ -115,10 +116,8 @@ pub fn reconcile(gh: &Gh, manifest: &Manifest, repo: &Repo, mode: Mode) -> Outco
             ));
         }
         rulesets_drift(gh, mode, &base, &rulesets, missing_workflows, &mut outcome);
-    } else if !needs.rulesets.is_empty() {
-        outcome
-            .skipped
-            .push("rulesets (private repo, without private_rulesets)".into());
+    } else {
+        skip_protection(&needs, &mut outcome);
     }
 
     if !needs.variables.is_empty() {
@@ -135,7 +134,7 @@ pub fn reconcile(gh: &Gh, manifest: &Manifest, repo: &Repo, mode: Mode) -> Outco
         outcome.record(result);
     }
 
-    if !needs.environments.is_empty() {
+    if protected && !needs.environments.is_empty() {
         let result = environments_drift(gh, mode, &base, &needs);
         outcome.record(result);
     }
@@ -490,6 +489,23 @@ fn variables_drift(gh: &Gh, mode: Mode, base: &str, needs: &Needs) -> Result<Vec
     }
 
     Ok(drift)
+}
+
+/// Rulesets, and environments' deployment policies, need GitHub Pro on private
+/// repos, a plan that can lapse without the manifest changing. So a private
+/// repo only gets them with `private_protection`; without it both are skipped.
+fn skip_protection(needs: &Needs, outcome: &mut Outcome) {
+    let sections = [
+        ("rulesets", needs.rulesets.is_empty()),
+        ("environments", needs.environments.is_empty()),
+    ];
+    for (section, empty) in sections {
+        if !empty {
+            outcome.skipped.push(format!(
+                "{section} (private repo, without private_protection)"
+            ));
+        }
+    }
 }
 
 /// Missing environments are created without protection rules, so the jobs

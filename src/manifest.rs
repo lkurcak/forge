@@ -43,10 +43,11 @@ struct RawManifest {
     #[serde(default)]
     actions: Map<String, Value>,
     release_tag_prefix: Option<String>,
-    /// Apply rulesets to private repos too, which needs GitHub Pro (or an
-    /// organization on Team); without it forge leaves them out there.
+    /// Apply rulesets and environments to private repos too, which needs
+    /// GitHub Pro (or an organization on Team) for them to protect anything;
+    /// without it forge leaves both out there.
     #[serde(default)]
-    private_rulesets: bool,
+    private_protection: bool,
     /// An input of the shared workflows that private repos must turn on and
     /// public ones leave off, like rust-ci's `light`: only private repos'
     /// Actions minutes are billed.
@@ -155,8 +156,9 @@ pub struct Manifest {
     pub stale: Stale,
     pub deps: Deps,
     pub leaks: Leaks,
-    /// Whether private repos get their rulesets (`private_rulesets`).
-    pub private_rulesets: bool,
+    /// Whether private repos get their rulesets and environments
+    /// (`private_protection`).
+    pub private_protection: bool,
     /// The input private repos' calls must turn on (`private_ci`).
     private_ci: Option<String>,
     tags: BTreeMap<String, Tag>,
@@ -349,7 +351,7 @@ impl Manifest {
             stale: raw.stale,
             deps: raw.deps,
             leaks: raw.leaks,
-            private_rulesets: raw.private_rulesets,
+            private_protection: raw.private_protection,
             private_ci: raw.private_ci,
             tags,
             pins: raw.pins.into_iter().map(|(f, p)| (f, p, None)).collect(),
@@ -587,18 +589,18 @@ mod tests {
     }
 
     #[test]
-    fn private_rulesets_are_opt_in() {
+    fn private_protection_is_opt_in() {
         let dir = std::env::temp_dir().join(format!("forge-private-{}", std::process::id()));
         fs::create_dir_all(&dir).unwrap();
         let path = dir.join("forge.toml");
         fs::write(&path, "owner = \"me\"\n").unwrap();
         let default = Manifest::load(&path).unwrap();
-        fs::write(&path, "owner = \"me\"\nprivate_rulesets = true\n").unwrap();
+        fs::write(&path, "owner = \"me\"\nprivate_protection = true\n").unwrap();
         let opted_in = Manifest::load(&path).unwrap();
         fs::remove_dir_all(&dir).unwrap();
 
-        assert!(!default.private_rulesets);
-        assert!(opted_in.private_rulesets);
+        assert!(!default.private_protection);
+        assert!(opted_in.private_protection);
     }
 
     #[test]
