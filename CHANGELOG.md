@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-10
+
+### Added
+
+- `forge leaks` scans every private repo you own for secrets committed to
+  it, with gitleaks: what GitHub's secret scanning does for public repos
+  but not for a user's private ones. It reports where each one is, never the
+  secret itself, and exits 1 if anything is found. The first run scans all
+  history, including PRs' commits; later runs only new commits. `[leaks]
+  ignore` in the manifest silences findings that are revoked or aren't
+  secrets.
+
 ## [0.6.0] - 2026-11-10
 
 ### Added
@@ -127,7 +139,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Prebuilt binaries for Windows, macOS and Linux are attached to each
   [GitHub release](https://github.com/lkurcak/forge/releases).
 
-[Unreleased]: https://github.com/lkurcak/forge/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/lkurcak/forge/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/lkurcak/forge/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/lkurcak/forge/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/lkurcak/forge/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/lkurcak/forge/compare/v0.4.0...v0.5.0

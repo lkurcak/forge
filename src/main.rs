@@ -6,6 +6,7 @@ mod diff;
 mod docker;
 mod gh;
 mod init;
+mod leaks;
 mod manifest;
 mod pins;
 mod progress;
@@ -94,6 +95,25 @@ enum Command {
         #[arg(long)]
         dry_run: bool,
     },
+    /// Scan every private repo you own for secrets committed to it, with
+    /// gitleaks.
+    ///
+    /// GitHub's secret scanning covers public repos, but not a user's
+    /// private ones. Every commit a branch, tag or PR reaches is scanned the
+    /// first time, and only new ones after that. Secrets aren't shown, just
+    /// where they are. Exits with 1 when something is found.
+    Leaks {
+        /// Repositories to scan, managed or not (default: every private
+        /// one, forks and archived ones aside).
+        repos: Vec<String>,
+        /// Scan public repositories too.
+        #[arg(long)]
+        public: bool,
+        /// Forget earlier runs: scan all history again, and report only
+        /// what's found in it now.
+        #[arg(long)]
+        full: bool,
+    },
     /// List open issues and PRs in any owned repo that have gone quiet.
     Stale {
         /// Days without activity before one counts as quiet.
@@ -137,9 +157,6 @@ fn run() -> Result<ExitCode> {
         Command::Stale { days } => stale(&gh, &manifest, days),
         Command::Bump { repos, dry_run } => bump(&gh, &manifest, &repos, dry_run),
         Command::Deps { repos, dry_run } => {
-            let cache = cache_dir()
-                .context("no cache directory: set XDG_CACHE_HOME or HOME")?
-                .join("forge");
             let selected = select(&manifest, &repos)?;
             Ok(deps::run(
                 &gh,
@@ -147,9 +164,22 @@ fn run() -> Result<ExitCode> {
                 &selected,
                 !repos.is_empty(),
                 dry_run,
-                &cache,
+                &forge_cache()?,
             ))
         }
+        Command::Leaks {
+            repos,
+            public,
+            full,
+        } => leaks::run(
+            &gh,
+            &manifest.owner,
+            &repos,
+            public,
+            full,
+            &manifest.leaks.ignore,
+            &forge_cache()?,
+        ),
         Command::Init { .. } => unreachable!("handled before loading a manifest"),
     }
 }
@@ -183,6 +213,13 @@ fn config_dir() -> Option<PathBuf> {
         .map(PathBuf::from)
         .or_else(|| var("HOME").map(|home| Path::new(&home).join(".config")))
         .or_else(|| var("APPDATA").map(PathBuf::from))
+}
+
+/// forge's directory in [`cache_dir`].
+fn forge_cache() -> Result<PathBuf> {
+    Ok(cache_dir()
+        .context("no cache directory: set XDG_CACHE_HOME or HOME")?
+        .join("forge"))
 }
 
 /// `$XDG_CACHE_HOME`, else `~/.cache`, else (on Windows) `%LOCALAPPDATA%`.
