@@ -1,0 +1,23 @@
+# How a repo calls t-ci.yml, from .github/workflows/t.yml. forge checks each
+# caller's triggers against these: a caller may leave some out, but add no
+# others ($default-branch stands for the repo's default branch). The inputs
+# are described in t-ci.yml.
+name: T
+
+on:
+  pull_request:
+  push:
+    branches: [$default-branch]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    uses: lkurcak/forge/.github/workflows/t-ci.yml@v1
+    with:
+      # Bump both together, from the release's asset digest:
+      # gh release view vX.Y.Z -R lkurcak/t-lang --json assets
+      t-version: v0.65.0
+      t-sha256: 0000000000000000000000000000000000000000000000000000000000000000

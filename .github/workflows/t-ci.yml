@@ -1,24 +1,9 @@
 name: T CI
 
 # The checks shared by every repo written in T (https://github.com/lkurcak/t-lang).
-# Each repo calls it from its t.yml; triggers can't be shared, so they live
-# there:
-#
-#   on:
-#     pull_request:
-#     push:
-#       branches: [main]
-#     workflow_dispatch:
-#   permissions:
-#     contents: read
-#   jobs:
-#     ci:
-#       uses: lkurcak/forge/.github/workflows/t-ci.yml@v1
-#       with:
-#         # Bump both together, from the release's asset digest:
-#         # gh release view vX.Y.Z -R lkurcak/t-lang --json assets
-#         t-version: v0.65.0
-#         t-sha256: <sha256 of t-lang-v0.65.0-x86_64-unknown-linux-gnu.tar.gz>
+# Each repo calls it from its t.yml like callers/t-ci.yml in this repo.
+# Triggers can't be shared, so they live there: a caller may leave some out
+# but add no others, which forge checks.
 #
 # The repo pins the `t` it's checked with, by version and by the sha256 of
 # the release archive, so a release whose archive changed fails here instead

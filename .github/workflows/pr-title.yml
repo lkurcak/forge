@@ -1,6 +1,8 @@
 name: PR title
 
-# Repos call this from pr.yml, including forge itself.
+# Repos call this from pr.yml like callers/pr-title.yml, including forge
+# itself. A caller may leave triggers out but add no others, which forge
+# checks.
 #
 # Private repos skip it: their Actions minutes are billed, at least a minute
 # for every PR event. A skipped check counts as passed, so a ruleset requiring

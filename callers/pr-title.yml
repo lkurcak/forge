@@ -1,0 +1,15 @@
+# How a repo calls pr-title.yml, from .github/workflows/pr.yml. forge checks
+# each caller's triggers against these: a caller may leave some out, but add
+# no others.
+name: PR
+
+on:
+  pull_request:
+    # Only these change the title or the commit a required check is on.
+    types: [opened, edited, synchronize, reopened]
+
+permissions: {}
+
+jobs:
+  pr-title:
+    uses: lkurcak/forge/.github/workflows/pr-title.yml@v1

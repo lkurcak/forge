@@ -1,20 +1,9 @@
 name: Rust CI
 
 # The checks shared by every Rust repo forge manages. Each repo's ci.yml calls
-# it; triggers can't be shared, so they live there:
-#
-#   on:
-#     pull_request:
-#     push:
-#       branches: [main]
-#     schedule:
-#       - cron: "0 6 * * 1"
-#     workflow_dispatch:
-#   permissions:
-#     contents: read
-#   jobs:
-#     ci:
-#       uses: lkurcak/forge/.github/workflows/rust-ci.yml@v1
+# it like callers/rust-ci.yml in this repo. Triggers can't be shared, so they
+# live there: a caller may leave some out but add no others, which forge
+# checks.
 #
 # Pull requests test the branch merged into main as it was then; the push run
 # tests what actually landed, which also covers direct pushes and is what the
@@ -25,15 +14,8 @@ name: Rust CI
 # Cargo.toml sets rust-version, with that toolchain. Writing the version as an
 # input (not `dtolnay/rust-toolchain@1.85`) keeps Dependabot from bumping it.
 #
-# A repo shipping a container image also runs it on version tags, and lets
-# the call publish packages:
+# A repo shipping a container image lets the call publish packages:
 #
-#   on:
-#     ...
-#     push:
-#       branches: [main]
-#       tags: ["v[0-9]+.[0-9]+.[0-9]+"]
-#   ...
 #   jobs:
 #     ci:
 #       uses: lkurcak/forge/.github/workflows/rust-ci.yml@v1
@@ -46,6 +28,12 @@ name: Rust CI
 # The container jobs take whatever the caller grants, so callers without
 # containers don't have to grant packages: write; every other job keeps
 # contents: read for itself.
+#
+# Each push to the default branch publishes the image as latest. When
+# Cargo.toml has a version the registry doesn't have yet, that push is the
+# release, and the image is tagged X.Y.Z and X.Y too. Tags build nothing:
+# a release builds once, on the default branch, whose build cache every
+# later run can read (a tag's run can't leave one anyone reads).
 #
 # Where Actions minutes are billed (private repos), `light: true` keeps CI to
 # a sanity check and leaves the rest to the machine the work is done on:
@@ -120,9 +108,10 @@ on:
         description: >-
           The repo ships as a container image, from the Dockerfile at its
           root: test on Linux only, where it runs, then build the image for
-          linux/amd64 and linux/arm64. Pull requests only build it; pushes publish it
-          to ghcr.io/{owner}/{repo}, as latest from main and as X.Y.Z and X.Y
-          from a vX.Y.Z tag, which must match Cargo.toml's version.
+          linux/amd64 and linux/arm64. Pull requests only build it; pushes to
+          the default branch publish it to ghcr.io/{owner}/{repo} as latest,
+          and as X.Y.Z and X.Y while the registry lacks Cargo.toml's version.
+          Tags build no image.
         type: boolean
         default: false
       light:
@@ -297,38 +286,18 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo build --workspace --no-default-features --locked --target "$NO_STD_TARGET"
 
-  # A vX.Y.Z tag must match Cargo.toml's version before any image is
-  # published under it. Same rule as rust-release.yml: every crate that gets
-  # published shares the version (all of them, if none is published).
-  version:
-    if: inputs.container && github.event_name == 'push' && github.ref_type == 'tag'
-    permissions:
-      contents: read
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Check tag matches Cargo.toml version
-        run: |
-          version=${GITHUB_REF_NAME#v}
-          mismatched=$(cargo metadata --no-deps --format-version 1 \
-            | jq -r --arg v "$version" '.packages as $all
-                | [$all[] | select(.publish != [])] | if length > 0 then . else $all end
-                | .[] | select(.version != $v) | "\(.name) \(.version)"')
-          if [ -n "$mismatched" ]; then
-            echo "::error::Tag $GITHUB_REF_NAME does not match Cargo.toml: $mismatched"
-            exit 1
-          fi
-
   # One image per architecture, each built natively and pushed by digest
   # alone; container-publish tags them together as one multi-arch image.
   # Built alone (light, without arm64), the image is pushed under its tags
-  # right here instead. Light builds images on pushes only.
+  # right here instead. Light builds images on pushes only. Of pushes, only
+  # the default branch's build one.
   container:
     if: >-
       ${{ !cancelled() && !failure() && inputs.container
-      && (!inputs.light || github.event_name == 'push') }}
-    needs: [fmt, clippy, test, doc, package, msrv, version]
+      && (!inputs.light || github.event_name == 'push')
+      && (github.event_name != 'push'
+      || github.ref == format('refs/heads/{0}', github.event.repository.default_branch)) }}
+    needs: [fmt, clippy, test, doc, package, msrv]
     strategy:
       fail-fast: false
       matrix:
@@ -350,14 +319,31 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      # A version Cargo.toml has and the registry doesn't is a release. Same
+      # rule as rust-release.yml: every crate that gets published shares the
+      # version (all of them, if none is published).
+      - if: env.PUSH == 'true' && env.ALONE == 'true'
+        name: Is this a release?
+        id: release
+        run: |
+          version=$(RUSTUP_TOOLCHAIN=stable cargo metadata --no-deps --format-version 1 \
+            | jq -r '.packages as $all
+                | [$all[] | select(.publish != [])] | if length > 0 then . else $all end
+                | .[0].version')
+          if docker buildx imagetools inspect "$IMAGE:$version" > /dev/null 2>&1; then
+            echo "$version is published already: tagging latest alone"
+          else
+            echo "Releasing $version"
+            echo "version=$version" >> "$GITHUB_OUTPUT"
+          fi
       - id: metadata
         uses: docker/metadata-action@v6
         with:
           images: ${{ env.IMAGE }}
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{version}},value=${{ steps.release.outputs.version }},enable=${{ steps.release.outputs.version != '' }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ steps.release.outputs.version }},enable=${{ steps.release.outputs.version != '' }}
       - id: arch
         run: echo "arch=${PLATFORM#linux/}" >> "$GITHUB_OUTPUT"
         env:
@@ -397,6 +383,7 @@ jobs:
     needs: container
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v7
       - uses: actions/download-artifact@v8
         with:
           path: ${{ runner.temp }}/digests
@@ -408,14 +395,30 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      # A version Cargo.toml has and the registry doesn't is a release. Same
+      # rule as rust-release.yml: every crate that gets published shares the
+      # version (all of them, if none is published).
+      - name: Is this a release?
+        id: release
+        run: |
+          version=$(RUSTUP_TOOLCHAIN=stable cargo metadata --no-deps --format-version 1 \
+            | jq -r '.packages as $all
+                | [$all[] | select(.publish != [])] | if length > 0 then . else $all end
+                | .[0].version')
+          if docker buildx imagetools inspect "$IMAGE:$version" > /dev/null 2>&1; then
+            echo "$version is published already: tagging latest alone"
+          else
+            echo "Releasing $version"
+            echo "version=$version" >> "$GITHUB_OUTPUT"
+          fi
       - id: metadata
         uses: docker/metadata-action@v6
         with:
           images: ${{ env.IMAGE }}
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{version}},value=${{ steps.release.outputs.version }},enable=${{ steps.release.outputs.version != '' }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ steps.release.outputs.version }},enable=${{ steps.release.outputs.version != '' }}
       - name: Tag the images as one
         working-directory: ${{ runner.temp }}/digests
         env:
@@ -440,7 +443,7 @@ jobs:
       ${{ !inputs.light && always()
       || inputs.light && !cancelled() && github.event_name != 'push'
       && (github.head_ref != 'forge/deps' || inputs.no-std) }}
-    needs: [fmt, clippy, test, doc, package, msrv, no-std, version, container, container-publish]
+    needs: [fmt, clippy, test, doc, package, msrv, no-std, container, container-publish]
     permissions:
       contents: read
     runs-on: ubuntu-latest

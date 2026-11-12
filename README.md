@@ -110,6 +110,10 @@ rulesets = ["protect-default-branch"]
 - `release_tag_prefix`: the latest GitHub release of each repo must be
   tagged this plus `X.Y.Z`. A repo can set its own, or `releases = false` for
   releases that aren't versions of it (a Homebrew tap's bottles, say).
+- A repo's `own_workflows = ["build.yml"]` lists the files in its
+  `.github/workflows` that aren't calls of a shared workflow. Any other file
+  there is reported, so a repo can't grow a workflow of its own without the
+  manifest saying so; a comment next to the list is the place to say why.
 
 ### Tags
 
@@ -155,13 +159,24 @@ same ref and only inputs it has. Calling one tags the repo with the
 workflow's name (`rust-ci`) and with each input it turns on
 (`container: true` tags it `container`), so those tags' requirements apply.
 
+A caller's file holds the call alone: another job in it is reported (move it
+to a file of its own, listed in `own_workflows`). Its triggers are checked
+against `callers/NAME.yml`, an example caller kept next to the shared
+workflow, at the same ref: a caller may leave triggers out, but add none,
+like a tag push to a workflow that only expects the default branch.
+`$default-branch` there stands for each repo's default branch. A shared
+workflow without that file takes any triggers.
+
 This repo's workflows are public, and anyone can call them at `@v1`, which
 moves along with compatible changes:
 
 - [`rust-ci.yml`](.github/workflows/rust-ci.yml): fmt, clippy, tests on
   Linux, macOS and Windows, docs, packaging and the MSRV. With
   `container: true` it builds and publishes a multi-arch image to ghcr.io
-  instead of testing on macOS and Windows. With `light: true`, for repos
+  instead of testing on macOS and Windows. Pushes to the default branch
+  publish it as `latest`, and while the registry lacks Cargo.toml's version,
+  as `X.Y.Z` and `X.Y` too: merging a version bump releases the image, once,
+  and tags build nothing. With `light: true`, for repos
   whose Actions minutes are billed (private ones), it's a sanity check: one
   Linux job on pull requests (fmt, clippy and, unless `tests: false`, the
   tests), and on pushes only the image, for linux/amd64 unless
@@ -179,7 +194,8 @@ moves along with compatible changes:
 - [`t-ci.yml`](.github/workflows/t-ci.yml): checks repos written in
   [T](https://github.com/lkurcak/t-lang).
 
-Each file's header shows how to call it, and its inputs say what they do.
+[`callers/`](callers) has an example call of each, and each workflow's
+inputs say what they do.
 
 ### Pins
 
@@ -292,6 +308,9 @@ still only published from tags. On a private repo, that rule needs
   shows as pending.
 - Open Dependabot alerts, as pending while a bot PR fixing one is under a
   week old. Bot PRs open longer than a week are reported too.
+- With `private_ci` set, a private repo's workflow that built the same
+  commit more than once in the last week: a branch and a tag pushed
+  together each start a run of a workflow both trigger, and both are billed.
 
 ## Credentials
 
