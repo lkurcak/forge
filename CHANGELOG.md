@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.2] - 2026-11-12
+
+### Added
+
+- A call of a shared workflow must grant every permission the workflow's
+  jobs ask for, or forge reports it: GitHub won't start the workflow at
+  all, even for jobs that would be skipped. `rust-release.yml` has asked
+  for `actions: write` since it began releasing version bumps, so a
+  `release.yml` without it silently released nothing.
+
 ## [0.9.1] - 2026-11-12
 
 ### Fixed
@@ -179,7 +189,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Prebuilt binaries for Windows, macOS and Linux are attached to each
   [GitHub release](https://github.com/lkurcak/forge/releases).
 
-[Unreleased]: https://github.com/lkurcak/forge/compare/v0.9.1...HEAD
+[Unreleased]: https://github.com/lkurcak/forge/compare/v0.9.2...HEAD
+[0.9.2]: https://github.com/lkurcak/forge/compare/v0.9.1...v0.9.2
 [0.9.1]: https://github.com/lkurcak/forge/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/lkurcak/forge/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/lkurcak/forge/compare/v0.7.0...v0.8.0

@@ -155,7 +155,9 @@ workflow's `uses:` reference:
 ```
 
 forge reads each shared workflow at that ref, and checks that callers use the
-same ref and only inputs it has. Calling one tags the repo with the
+same ref and only inputs it has, and grant every permission its jobs ask for:
+GitHub won't start a shared workflow when one of its jobs asks for more than
+the call grants, even a job that would be skipped. Calling one tags the repo with the
 workflow's name (`rust-ci`) and with each input it turns on
 (`container: true` tags it `container`), so those tags' requirements apply.
 
