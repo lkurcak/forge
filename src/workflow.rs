@@ -11,6 +11,10 @@
 //! triggers out, but add none. And a repo's workflow files must each be a
 //! call, or listed as the repo's own (`own_workflows`), so a workflow can't
 //! be added without the manifest saying so.
+//!
+//! GitHub won't start a shared workflow at all when one of its jobs asks for
+//! a permission the call doesn't grant, even a job that would be skipped, so
+//! a call must grant every permission the workflow's jobs ask for.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -35,6 +39,8 @@ pub struct SharedWorkflow {
     /// The `on:` of `callers/{name}.yml`: every trigger a caller may have.
     /// `None` without that file, and then any trigger goes.
     triggers: Option<Value>,
+    /// The most each permission is asked for, by the workflow or any job.
+    permissions: Permissions,
 }
 
 /// A repo's call of a shared workflow.
@@ -45,6 +51,120 @@ pub struct Call {
     on: Value,
     /// Jobs in the caller's file other than the call.
     other_jobs: Vec<String>,
+    /// What the call grants: its job's `permissions`, or else the file's.
+    /// `None` leaves the repo's default token.
+    grant: Option<Permissions>,
+}
+
+/// How much of a permission a token has.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Level {
+    None,
+    Read,
+    Write,
+}
+
+impl Level {
+    fn parse(value: &Value) -> Self {
+        match value.as_str() {
+            Some("write") => Self::Write,
+            Some("read") => Self::Read,
+            _ => Self::None,
+        }
+    }
+
+    const fn name(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Read => "read",
+            Self::Write => "write",
+        }
+    }
+}
+
+/// A `permissions:` value: one level for every permission (`read-all`,
+/// `write-all`), and one per permission listed.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Permissions {
+    all: Option<Level>,
+    each: BTreeMap<String, Level>,
+}
+
+impl Permissions {
+    /// `None` for a missing `permissions:`.
+    fn parse(value: &Value) -> Option<Self> {
+        match value {
+            Value::Null => None,
+            Value::String(all) => Some(Self {
+                all: Some(match all.as_str() {
+                    "write-all" => Level::Write,
+                    "read-all" => Level::Read,
+                    _ => Level::None,
+                }),
+                each: BTreeMap::new(),
+            }),
+            Value::Object(each) => Some(Self {
+                all: None,
+                each: each
+                    .iter()
+                    .map(|(name, level)| (name.clone(), Level::parse(level)))
+                    .collect(),
+            }),
+            _ => Some(Self::default()),
+        }
+    }
+
+    /// The token workflows get without a `permissions:` of their own, from
+    /// the repo's `default_workflow_permissions`: `write` for everything, or
+    /// else (`read`, GitHub's default) reading the code and packages.
+    pub fn default_token(setting: Option<&str>) -> Self {
+        if setting == Some("write") {
+            return Self {
+                all: Some(Level::Write),
+                each: BTreeMap::new(),
+            };
+        }
+        Self {
+            all: None,
+            each: [("contents", Level::Read), ("packages", Level::Read)]
+                .into_iter()
+                .map(|(name, level)| (name.to_owned(), level))
+                .collect(),
+        }
+    }
+
+    fn level(&self, name: &str) -> Level {
+        self.each
+            .get(name)
+            .copied()
+            .or(self.all)
+            .unwrap_or(Level::None)
+    }
+
+    /// Raises each permission to at least what `other` has.
+    fn add(&mut self, other: &Self) {
+        self.all = self.all.max(other.all);
+        for (name, &level) in &other.each {
+            let entry = self.each.entry(name.clone()).or_insert(Level::None);
+            *entry = (*entry).max(level);
+        }
+    }
+
+    /// What `self` asks for that `grant` doesn't give, as `name: level`.
+    fn missing_from(&self, grant: &Self) -> Vec<String> {
+        let mut missing: Vec<String> = self
+            .each
+            .iter()
+            .filter(|&(name, &level)| grant.level(name) < level)
+            .map(|(name, level)| format!("{name}: {}", level.name()))
+            .collect();
+        if let Some(all) = self.all
+            && grant.all.is_none_or(|granted| granted < all)
+        {
+            missing.push(format!("{}-all", all.name()));
+        }
+        missing
+    }
 }
 
 impl Call {
@@ -129,6 +249,17 @@ impl SharedWorkflow {
         let path = uses.split_once('@').map_or(uses, |(path, _)| path);
         let yaml: Value =
             serde_yaml_ng::from_str(text).with_context(|| format!("parsing {uses}"))?;
+        let mut permissions = Permissions::parse(&yaml["permissions"]).unwrap_or_default();
+        for job in yaml["jobs"]
+            .as_object()
+            .into_iter()
+            .flatten()
+            .map(|(_, j)| j)
+        {
+            if let Some(asked) = Permissions::parse(&job["permissions"]) {
+                permissions.add(&asked);
+            }
+        }
         let triggers = example
             .map(|example| {
                 let yaml: Value = serde_yaml_ng::from_str(example)
@@ -168,6 +299,7 @@ impl SharedWorkflow {
             inputs,
             targets,
             triggers,
+            permissions,
         })
     }
 
@@ -224,6 +356,8 @@ impl SharedWorkflow {
                 .map_or_default(|w| w.clone().into_iter().collect()),
             on: yaml["on"].clone(),
             other_jobs,
+            grant: Permissions::parse(&job["permissions"])
+                .or_else(|| Permissions::parse(&yaml["permissions"])),
         }))
     }
 
@@ -237,9 +371,26 @@ impl SharedWorkflow {
 
     /// What's wrong with a repo's call; the repo has to fix these itself.
     /// `default_branch` is what `$default-branch` in the example caller's
-    /// triggers stands for.
-    pub fn problems(&self, call: &Call, default_branch: &str) -> Vec<String> {
+    /// triggers stands for, and `default_token` what a call granting no
+    /// permissions gets.
+    pub fn problems(
+        &self,
+        call: &Call,
+        default_branch: &str,
+        default_token: &Permissions,
+    ) -> Vec<String> {
         let mut problems = Vec::new();
+        let missing = self
+            .permissions
+            .missing_from(call.grant.as_ref().unwrap_or(default_token));
+        if !missing.is_empty() {
+            problems.push(format!(
+                "{}: {} asks for {}, which the call doesn't grant, so GitHub won't start it",
+                self.caller,
+                self.name,
+                missing.join(", ")
+            ));
+        }
         if call.git_ref != self.git_ref {
             problems.push(format!(
                 "{}: calls {}@{}, should be @{}",
@@ -459,6 +610,11 @@ pub fn local(caller: &str, uses: &str) -> Result<SharedWorkflow> {
 mod tests {
     use super::*;
 
+    /// GitHub's default token: reading the code and packages.
+    fn token() -> Permissions {
+        Permissions::default_token(Some("read"))
+    }
+
     fn shared() -> SharedWorkflow {
         local(
             "release.yml",
@@ -475,6 +631,10 @@ on:
 jobs:
   release:
     uses: lkurcak/forge/.github/workflows/rust-release.yml@v1
+    permissions:
+      contents: write
+      id-token: write
+      actions: write
     secrets: inherit
     with:
       binaries: true
@@ -500,7 +660,10 @@ jobs:
             .unwrap();
         assert_eq!(shared.inputs, Vec::<String>::new());
         assert_eq!(shared.targets(&call), Vec::<String>::new());
-        assert_eq!(shared.problems(&call, "main"), Vec::<String>::new());
+        assert_eq!(
+            shared.problems(&call, "main", &token()),
+            Vec::<String>::new()
+        );
     }
 
     #[test]
@@ -511,7 +674,10 @@ jobs:
             release.enabled().collect::<Vec<_>>(),
             ["binaries", "winget"]
         );
-        assert_eq!(shared.problems(&release, "main"), Vec::<String>::new());
+        assert_eq!(
+            shared.problems(&release, "main", &token()),
+            Vec::<String>::new()
+        );
 
         let targets = shared.targets(&release);
         let windows = targets.iter().filter(|t| t.contains("windows")).count();
@@ -523,7 +689,7 @@ jobs:
         let shared = shared();
         let call = CALL.replace("@v1", "@main").replace("winget:", "wignet:");
         let release = shared.parse_call(&call).unwrap().unwrap();
-        assert_eq!(shared.problems(&release, "main").len(), 2);
+        assert_eq!(shared.problems(&release, "main", &token()).len(), 2);
     }
 
     #[test]
@@ -597,7 +763,10 @@ jobs:
             .unwrap();
             for text in [Some(example.as_str()), own].into_iter().flatten() {
                 let call = shared.parse_call(text).unwrap().unwrap();
-                assert_eq!(shared.problems(&call, "main"), Vec::<String>::new());
+                assert_eq!(
+                    shared.problems(&call, "main", &token()),
+                    Vec::<String>::new()
+                );
             }
         }
     }
@@ -609,7 +778,7 @@ jobs:
             let text = format!(
                 "on:\n{on}\njobs:\n  ci:\n    uses: lkurcak/forge/.github/workflows/rust-ci.yml@v1\n"
             );
-            ci.problems(&ci.parse_call(&text).unwrap().unwrap(), "trunk")
+            ci.problems(&ci.parse_call(&text).unwrap().unwrap(), "trunk", &token())
         };
         assert_eq!(
             problems("  push:\n    branches: [trunk]"),
@@ -651,7 +820,7 @@ jobs:
             let text = format!(
                 "on:\n  pull_request:\n    types: [{types}]\njobs:\n  t:\n    uses: lkurcak/forge/.github/workflows/pr-title.yml@v1\n"
             );
-            pr.problems(&pr.parse_call(&text).unwrap().unwrap(), "main")
+            pr.problems(&pr.parse_call(&text).unwrap().unwrap(), "main", &token())
         };
         assert_eq!(call("opened, edited, reopened"), Vec::<String>::new());
         assert_eq!(call("opened, closed").len(), 1);
@@ -663,7 +832,7 @@ jobs:
         let text = "on: pull_request\njobs:\n  ci:\n    uses: lkurcak/forge/.github/workflows/rust-ci.yml@v1\n  extra:\n    runs-on: ubuntu-latest\n";
         let call = ci.parse_call(text).unwrap().unwrap();
         assert_eq!(
-            ci.problems(&call, "main"),
+            ci.problems(&call, "main", &token()),
             [
                 ".github/workflows/ci.yml: job extra isn't the rust-ci call: move it to a workflow of its own, in own_workflows"
             ]
@@ -717,6 +886,42 @@ jobs:
             Vec::<String>::new()
         );
         assert_eq!(problems("me/app", &["rust-ci.yml"], &[]).len(), 1);
+    }
+
+    #[test]
+    fn a_call_grants_what_the_workflow_asks_for() {
+        let release = shared();
+        assert_eq!(
+            release.permissions.missing_from(&token()),
+            ["actions: write", "contents: write", "id-token: write"]
+        );
+        // The release.yml forge's rust-release gained the tag job under.
+        let before = CALL.replace("      actions: write\n", "");
+        let call = release.parse_call(&before).unwrap().unwrap();
+        assert_eq!(
+            release.problems(&call, "main", &token()),
+            [
+                ".github/workflows/release.yml: rust-release asks for actions: write, which the call doesn't grant, so GitHub won't start it"
+            ]
+        );
+
+        // A file-wide grant counts, and so does the default token.
+        let ci = local("ci.yml", "lkurcak/forge/.github/workflows/rust-ci.yml@v1").unwrap();
+        let call = |text: &str| ci.parse_call(text).unwrap().unwrap();
+        let uses = "jobs:\n  ci:\n    uses: lkurcak/forge/.github/workflows/rust-ci.yml@v1\n";
+        let none = call(&format!("permissions: {{}}\n{uses}"));
+        assert_eq!(ci.problems(&none, "main", &token()).len(), 1);
+        assert_eq!(
+            ci.problems(&call(uses), "main", &token()),
+            Vec::<String>::new()
+        );
+        let read_all = call(&format!("permissions: read-all\n{uses}"));
+        assert_eq!(
+            ci.problems(&read_all, "main", &token()),
+            Vec::<String>::new()
+        );
+        let nothing = Permissions::default_token(None).missing_from(&token());
+        assert_eq!(nothing, Vec::<String>::new());
     }
 
     #[test]

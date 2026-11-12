@@ -7,7 +7,7 @@ use crate::cargo::Workspace;
 use crate::diff::subset;
 use crate::gh::Gh;
 use crate::manifest::{Actions, Manifest, Needs, Repo, Ruleset};
-use crate::workflow::Call;
+use crate::workflow::{Call, Permissions};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
@@ -177,11 +177,17 @@ fn workflows_drift(
     let base = format!("repos/{owner}/{}", repo.name);
     let public = actual["private"] == false;
     let default_branch = actual["default_branch"].as_str().unwrap_or("main");
+    let default_token = Permissions::default_token(
+        repo.actions
+            .workflow
+            .get("default_workflow_permissions")
+            .and_then(Value::as_str),
+    );
     for (workflow, call) in manifest.workflows.iter().zip(calls) {
         if let Some(call) = call {
             outcome
                 .manual
-                .extend(workflow.problems(call, default_branch));
+                .extend(workflow.problems(call, default_branch, &default_token));
         }
     }
     let full_name = format!("{owner}/{}", repo.name);
