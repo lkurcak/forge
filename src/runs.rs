@@ -54,7 +54,7 @@ pub fn duplicates(gh: &Gh, base: &str) -> Result<Vec<String>> {
         .collect())
 }
 
-/// Push runs by workflow file name and commit.
+/// Push runs by workflow file and commit.
 fn by_commit(runs: &Value) -> BTreeMap<(String, String), Vec<Run>> {
     let mut grouped: BTreeMap<(String, String), Vec<Run>> = BTreeMap::new();
     for run in runs["workflow_runs"].as_array().into_iter().flatten() {
@@ -65,7 +65,7 @@ fn by_commit(runs: &Value) -> BTreeMap<(String, String), Vec<Run>> {
         ) else {
             continue;
         };
-        let file = path.rsplit('/').next().unwrap_or(path).to_owned();
+        let file = path.to_owned();
         grouped
             .entry((file, sha.to_owned()))
             .or_default()
@@ -130,7 +130,10 @@ mod tests {
         ]});
         let grouped = by_commit(&runs);
         assert_eq!(grouped.len(), 2);
-        let twice = &grouped[&("publish.yml".to_owned(), "bbbbbbbbb".to_owned())];
+        let twice = &grouped[&(
+            ".github/workflows/publish.yml".to_owned(),
+            "bbbbbbbbb".to_owned(),
+        )];
         assert_eq!(twice.iter().map(|r| r.id).collect::<Vec<_>>(), [4, 3]);
     }
 
@@ -153,14 +156,14 @@ mod tests {
             by_commit(&runs).into_values().next().unwrap()
         };
         let line = describe(
-            "publish.yml",
+            ".github/workflows/publish.yml",
             &[
                 ("aaaaaaaaa".to_owned(), runs("aaaaaaaaa", "10")),
                 ("bbbbbbbbb".to_owned(), runs("bbbbbbbbb", "12")),
             ],
         );
         assert!(
-            line.starts_with("publish.yml: built 2 commits more than once"),
+            line.starts_with(".github/workflows/publish.yml: built 2 commits more than once"),
             "{line}"
         );
         assert!(

@@ -343,11 +343,11 @@ pub fn file_problems(
             }),
             _ if own.contains(file) || workflows.iter().any(|w| w.is(repo, file)) => None,
             Some((workflow, None)) => Some(format!(
-                "{file}: doesn't call {}: make it the call, or list it in own_workflows",
+                ".github/workflows/{file}: doesn't call {}: make it the call, or list it in own_workflows",
                 workflow.name
             )),
             None => Some(format!(
-                "{file}: calls no shared workflow: move it into one, or list it in own_workflows"
+                ".github/workflows/{file}: calls no shared workflow: move it into one, or list it in own_workflows"
             )),
         });
     }
@@ -693,12 +693,14 @@ jobs:
         );
         assert_eq!(
             problems("me/app", &["ci.yml", "build.yml"], &[]),
-            ["build.yml: calls no shared workflow: move it into one, or list it in own_workflows"]
+            [
+                ".github/workflows/build.yml: calls no shared workflow: move it into one, or list it in own_workflows"
+            ]
         );
         assert_eq!(
             problems("me/app", &["release.yml"], &[]),
             [
-                "release.yml: doesn't call rust-release: make it the call, or list it in own_workflows"
+                ".github/workflows/release.yml: doesn't call rust-release: make it the call, or list it in own_workflows"
             ]
         );
         assert_eq!(
