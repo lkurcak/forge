@@ -26,15 +26,19 @@ struct Run {
 
 /// A line per workflow file that more than one push run did work on (gave
 /// a job a runner) for the same commit, in the last week. `base` is
-/// `repos/{owner}/{name}`.
-pub fn duplicates(gh: &Gh, base: &str) -> Result<Vec<String>> {
+/// `repos/{owner}/{name}`; `files` are the names in its .github/workflows
+/// now, since a deleted workflow can't build anything twice again.
+pub fn duplicates(gh: &Gh, base: &str, files: &[String]) -> Result<Vec<String>> {
     let since = days::format(days::today() - DAYS);
     let runs = gh.get(&format!(
         "{base}/actions/runs?event=push&created=%3E%3D{since}&per_page=100"
     ))?;
     let mut found: BTreeMap<String, Vec<(String, Vec<Run>)>> = BTreeMap::new();
     for ((file, sha), runs) in by_commit(&runs) {
-        if runs.len() < 2 {
+        let exists = file
+            .strip_prefix(".github/workflows/")
+            .is_some_and(|name| files.iter().any(|f| f == name));
+        if runs.len() < 2 || !exists {
             continue;
         }
         let mut worked = Vec::new();

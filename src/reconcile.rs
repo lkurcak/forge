@@ -185,18 +185,22 @@ fn workflows_drift(
         }
     }
     let full_name = format!("{owner}/{}", repo.name);
-    match gh.dir(&full_name, ".github/workflows") {
-        Ok(files) => outcome.manual.extend(crate::workflow::file_problems(
-            &full_name,
-            &files.unwrap_or_default(),
-            &manifest.workflows,
-            calls,
-            &repo.own_workflows,
-        )),
-        Err(err) => outcome.errors.push(format!("{err:#}")),
-    }
+    let files = match gh.dir(&full_name, ".github/workflows") {
+        Ok(files) => files.unwrap_or_default(),
+        Err(err) => {
+            outcome.errors.push(format!("{err:#}"));
+            return;
+        }
+    };
+    outcome.manual.extend(crate::workflow::file_problems(
+        &full_name,
+        &files,
+        &manifest.workflows,
+        calls,
+        &repo.own_workflows,
+    ));
     if !public && manifest.watches_minutes() {
-        match crate::runs::duplicates(gh, &base) {
+        match crate::runs::duplicates(gh, &base, &files) {
             Ok(found) => outcome.manual.extend(found),
             Err(err) => outcome.errors.push(format!("{err:#}")),
         }
