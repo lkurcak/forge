@@ -12,6 +12,7 @@ mod pins;
 mod progress;
 mod reconcile;
 mod release;
+mod runs;
 mod stale;
 mod workflow;
 

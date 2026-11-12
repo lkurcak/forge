@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Every file in a repo's `.github/workflows` must now be a call of a shared
+  workflow, or be listed in the repo's `own_workflows` in the manifest;
+  forge reports any other. List your repos' own workflow files when you
+  upgrade.
+- A caller's triggers are checked against `callers/NAME.yml`, an example
+  caller next to the shared workflow: a caller may leave triggers out, but
+  add none. A job next to the call in a caller's file is reported too.
+- With `private_ci` set, forge reports a private repo's workflow that built
+  the same commit more than once in the last week, like a release whose
+  branch and tag pushes each started a build.
+
+### Changed
+
+- `rust-ci.yml` with `container: true` releases an image from the push to
+  the default branch: when the registry lacks Cargo.toml's version, that
+  push tags the image `X.Y.Z` and `X.Y` as well as `latest`. Tag pushes no
+  longer build an image, so a release builds once instead of twice. Drop
+  the `tags:` trigger from callers' ci.yml; forge reports it.
+
 ## [0.8.0] - 2026-11-10
 
 ### Changed

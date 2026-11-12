@@ -5,12 +5,18 @@
 //! what it ships). forge only reads the call, treating each input turned on
 //! as a tag (so `winget: true` brings the winget tag's secret), and checks it
 //! against the shared workflow itself.
+//!
+//! Its triggers are checked against `callers/{name}.yml`, an example caller
+//! kept next to the shared workflow, at the same ref: a caller may leave
+//! triggers out, but add none. And a repo's workflow files must each be a
+//! call, or listed as the repo's own (`own_workflows`), so a workflow can't
+//! be added without the manifest saying so.
 
 use std::collections::BTreeMap;
 use std::path::Path;
 
 use anyhow::{Context, Result, bail};
-use serde_json::Value;
+use serde_json::{Map, Value};
 
 use crate::gh::Gh;
 
@@ -26,12 +32,19 @@ pub struct SharedWorkflow {
     inputs: Vec<String>,
     /// Targets built per input, from the workflow's `{INPUT}_TARGETS` env.
     targets: BTreeMap<String, Vec<String>>,
+    /// The `on:` of `callers/{name}.yml`: every trigger a caller may have.
+    /// `None` without that file, and then any trigger goes.
+    triggers: Option<Value>,
 }
 
 /// A repo's call of a shared workflow.
 pub struct Call {
     git_ref: String,
     pub inputs: BTreeMap<String, Value>,
+    /// The caller's `on:`.
+    on: Value,
+    /// Jobs in the caller's file other than the call.
+    other_jobs: Vec<String>,
 }
 
 impl Call {
@@ -94,22 +107,35 @@ impl Reference {
 }
 
 impl SharedWorkflow {
-    /// Reads the workflow `uses` names from GitHub, at the ref callers use.
-    /// Repos call it from `.github/workflows/{caller}`.
+    /// Reads the workflow `uses` names from GitHub, at the ref callers use,
+    /// with its example caller. Repos call it from `.github/workflows/{caller}`.
     pub fn fetch(gh: &Gh, caller: &str, uses: &str) -> Result<Self> {
         let reference = Reference::parse(uses)?;
         let text = gh
             .file(&reference.repo, &reference.file, Some(&reference.git_ref))?
             .with_context(|| format!("{uses} doesn't exist"))?;
-        Self::parse(caller, uses, &text)
+        let example = gh.file(
+            &reference.repo,
+            &format!("callers/{}.yml", reference.name()),
+            Some(&reference.git_ref),
+        )?;
+        Self::parse(caller, uses, &text, example.as_deref())
     }
 
-    /// Reads the workflow `uses` names from its text.
-    pub fn parse(caller: &str, uses: &str, text: &str) -> Result<Self> {
+    /// Reads the workflow `uses` names from its text, and the triggers
+    /// callers may have from its example caller's.
+    pub fn parse(caller: &str, uses: &str, text: &str, example: Option<&str>) -> Result<Self> {
         let reference = Reference::parse(uses)?;
         let path = uses.split_once('@').map_or(uses, |(path, _)| path);
         let yaml: Value =
             serde_yaml_ng::from_str(text).with_context(|| format!("parsing {uses}"))?;
+        let triggers = example
+            .map(|example| {
+                let yaml: Value = serde_yaml_ng::from_str(example)
+                    .with_context(|| format!("parsing callers/{}.yml", reference.name()))?;
+                anyhow::Ok(yaml["on"].clone())
+            })
+            .transpose()?;
 
         let workflow_call = yaml["on"]
             .get("workflow_call")
@@ -141,7 +167,19 @@ impl SharedWorkflow {
             git_ref: reference.git_ref,
             inputs,
             targets,
+            triggers,
         })
+    }
+
+    /// The file name repos call it from, like `ci.yml`.
+    pub fn caller_file(&self) -> &str {
+        self.caller.trim_start_matches(".github/workflows/")
+    }
+
+    /// Whether `file` in `repo`'s (`owner/name`) .github/workflows is this
+    /// workflow itself, in the repo sharing it.
+    pub fn is(&self, repo: &str, file: &str) -> bool {
+        self.path == format!("{repo}/.github/workflows/{file}")
     }
 
     /// The repo's call of this workflow, if it has one.
@@ -172,11 +210,20 @@ impl SharedWorkflow {
             [call] => *call,
             _ => bail!("calls {} more than once", self.path),
         };
+        let other_jobs = yaml["jobs"]
+            .as_object()
+            .into_iter()
+            .flatten()
+            .filter(|(_, other)| !std::ptr::eq(*other, job))
+            .map(|(name, _)| name.clone())
+            .collect();
         Ok(Some(Call {
             git_ref: git_ref.to_owned(),
             inputs: job["with"]
                 .as_object()
                 .map_or_default(|w| w.clone().into_iter().collect()),
+            on: yaml["on"].clone(),
+            other_jobs,
         }))
     }
 
@@ -189,7 +236,9 @@ impl SharedWorkflow {
     }
 
     /// What's wrong with a repo's call; the repo has to fix these itself.
-    pub fn problems(&self, call: &Call) -> Vec<String> {
+    /// `default_branch` is what `$default-branch` in the example caller's
+    /// triggers stands for.
+    pub fn problems(&self, call: &Call, default_branch: &str) -> Vec<String> {
         let mut problems = Vec::new();
         if call.git_ref != self.git_ref {
             problems.push(format!(
@@ -201,6 +250,20 @@ impl SharedWorkflow {
             if !self.inputs.contains(input) {
                 problems.push(format!(
                     "{}: {} has no input {input}",
+                    self.caller, self.name
+                ));
+            }
+        }
+        for job in &call.other_jobs {
+            problems.push(format!(
+                "{}: job {job} isn't the {} call: move it to a workflow of its own, in own_workflows",
+                self.caller, self.name
+            ));
+        }
+        if let Some(triggers) = &self.triggers {
+            for extra in extra_triggers(&call.on, triggers, default_branch) {
+                problems.push(format!(
+                    "{}: {extra} isn't among callers/{}.yml's triggers",
                     self.caller, self.name
                 ));
             }
@@ -246,12 +309,150 @@ impl SharedWorkflow {
     }
 }
 
-/// One of this repo's own shared workflows, read from disk rather than GitHub.
+/// What's wrong with the files in a repo's .github/workflows, `files`. Each
+/// must call a shared workflow from the file `[workflows]` names for it, be
+/// listed in the repo's `own_workflows`, or be one of the shared workflows,
+/// in the repo sharing them. `calls` pairs with `workflows`; `repo` is
+/// `owner/name`.
+pub fn file_problems(
+    repo: &str,
+    files: &[String],
+    workflows: &[SharedWorkflow],
+    calls: &[Option<Call>],
+    own: &[String],
+) -> Vec<String> {
+    let mut problems = Vec::new();
+    for file in files {
+        let path = Path::new(file);
+        if !matches!(
+            path.extension().and_then(|e| e.to_str()),
+            Some("yml" | "yaml")
+        ) {
+            continue;
+        }
+        let caller = workflows
+            .iter()
+            .zip(calls)
+            .find(|(w, _)| w.caller_file() == file);
+        problems.extend(match caller {
+            Some((workflow, Some(_))) => own.contains(file).then(|| {
+                format!(
+                    "own_workflows lists {file}, which calls {}: take it off, calls are checked as calls",
+                    workflow.name
+                )
+            }),
+            _ if own.contains(file) || workflows.iter().any(|w| w.is(repo, file)) => None,
+            Some((workflow, None)) => Some(format!(
+                "{file}: doesn't call {}: make it the call, or list it in own_workflows",
+                workflow.name
+            )),
+            None => Some(format!(
+                "{file}: calls no shared workflow: move it into one, or list it in own_workflows"
+            )),
+        });
+    }
+    for file in own {
+        if !files.contains(file) {
+            problems.push(format!(
+                "own_workflows lists {file}, which .github/workflows doesn't have"
+            ));
+        }
+    }
+    problems
+}
+
+/// `on:` as a map of event to filters (null for none), whichever of YAML's
+/// forms it's written in: one event, a list of them, or a map.
+fn events(on: &Value) -> Map<String, Value> {
+    match on {
+        Value::String(event) => Map::from_iter([(event.clone(), Value::Null)]),
+        Value::Array(events) => events
+            .iter()
+            .filter_map(|e| Some((e.as_str()?.to_owned(), Value::Null)))
+            .collect(),
+        Value::Object(events) => events.clone(),
+        _ => Map::new(),
+    }
+}
+
+/// A filter's values: one string, or a list of them. A schedule's are its
+/// cron expressions.
+fn values(filter: &Value) -> Vec<String> {
+    match filter {
+        Value::String(value) => vec![value.clone()],
+        Value::Array(values) => values
+            .iter()
+            .filter_map(|v| v.as_str().or_else(|| v["cron"].as_str()))
+            .map(str::to_owned)
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// The triggers in `on` that `allowed` doesn't have, described: an event it
+/// lacks, a filter value it doesn't list, a filter it doesn't use, or an
+/// event without the filters it narrows that event with.
+fn extra_triggers(on: &Value, allowed: &Value, default_branch: &str) -> Vec<String> {
+    let allowed = events(allowed);
+    let mut extra = Vec::new();
+    for (event, filters) in events(on) {
+        let Some(allowed_filters) = allowed.get(&event) else {
+            extra.push(event);
+            continue;
+        };
+        if event == "schedule" {
+            let allowed = values(allowed_filters);
+            for cron in values(&filters) {
+                if !allowed.contains(&cron) {
+                    extra.push(format!("schedule {cron}"));
+                }
+            }
+            continue;
+        }
+        let empty = Map::new();
+        let filters = filters.as_object().unwrap_or(&empty);
+        let allowed_filters = allowed_filters.as_object().unwrap_or(&empty);
+        if filters.is_empty() && !allowed_filters.is_empty() {
+            extra.push(format!("{event} without filters"));
+            continue;
+        }
+        for (filter, values_) in filters {
+            let Some(allowed_values) = allowed_filters.get(filter) else {
+                extra.push(format!("{event}.{filter}"));
+                continue;
+            };
+            let branch = |v: String| {
+                if v == "$default-branch" {
+                    default_branch.to_owned()
+                } else {
+                    v
+                }
+            };
+            let allowed_values: Vec<String> =
+                values(allowed_values).into_iter().map(branch).collect();
+            for value in values(values_) {
+                if !allowed_values.contains(&branch(value.clone())) {
+                    extra.push(format!("{event}.{filter} {value}"));
+                }
+            }
+        }
+    }
+    extra
+}
+
+/// One of this repo's own shared workflows, read from disk rather than GitHub,
+/// with its example caller from callers/.
 #[cfg(test)]
 pub fn local(caller: &str, uses: &str) -> Result<SharedWorkflow> {
     let reference = Reference::parse(uses)?;
-    let file = Path::new(env!("CARGO_MANIFEST_DIR")).join(&reference.file);
-    SharedWorkflow::parse(caller, uses, &std::fs::read_to_string(file)?)
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let example = dir.join(format!("callers/{}.yml", reference.name()));
+    SharedWorkflow::parse(
+        caller,
+        uses,
+        &std::fs::read_to_string(dir.join(&reference.file))?,
+        std::fs::read_to_string(example).ok().as_deref(),
+    )
 }
 
 #[cfg(test)]
@@ -299,7 +500,7 @@ jobs:
             .unwrap();
         assert_eq!(shared.inputs, Vec::<String>::new());
         assert_eq!(shared.targets(&call), Vec::<String>::new());
-        assert_eq!(shared.problems(&call), Vec::<String>::new());
+        assert_eq!(shared.problems(&call, "main"), Vec::<String>::new());
     }
 
     #[test]
@@ -310,7 +511,7 @@ jobs:
             release.enabled().collect::<Vec<_>>(),
             ["binaries", "winget"]
         );
-        assert_eq!(shared.problems(&release), Vec::<String>::new());
+        assert_eq!(shared.problems(&release, "main"), Vec::<String>::new());
 
         let targets = shared.targets(&release);
         let windows = targets.iter().filter(|t| t.contains("windows")).count();
@@ -322,7 +523,7 @@ jobs:
         let shared = shared();
         let call = CALL.replace("@v1", "@main").replace("winget:", "wignet:");
         let release = shared.parse_call(&call).unwrap().unwrap();
-        assert_eq!(shared.problems(&release).len(), 2);
+        assert_eq!(shared.problems(&release, "main").len(), 2);
     }
 
     #[test]
@@ -363,6 +564,157 @@ jobs:
         assert_eq!(reference.name(), "ci");
         assert!(Reference::parse("a/b/ci.yml").is_err());
         assert!(Reference::parse("a/ci.yml@v1").is_err());
+    }
+
+    /// Every shared workflow in this repo, with its caller's file name and
+    /// this repo's own call of it, if it has one.
+    fn all() -> Vec<(SharedWorkflow, Option<&'static str>)> {
+        let uses = |name: &str| format!("lkurcak/forge/.github/workflows/{name}.yml@v1");
+        vec![
+            (
+                local("ci.yml", &uses("rust-ci")).unwrap(),
+                Some(include_str!("../.github/workflows/ci.yml")),
+            ),
+            (
+                local("release.yml", &uses("rust-release")).unwrap(),
+                Some(include_str!("../.github/workflows/release.yml")),
+            ),
+            (
+                local("pr.yml", &uses("pr-title")).unwrap(),
+                Some(include_str!("../.github/workflows/pr.yml")),
+            ),
+            (local("t.yml", &uses("t-ci")).unwrap(), None),
+        ]
+    }
+
+    #[test]
+    fn examples_and_this_repos_calls_pass() {
+        for (shared, own) in all() {
+            assert!(shared.triggers.is_some(), "callers/{}.yml", shared.name);
+            let example = std::fs::read_to_string(
+                Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("callers/{}.yml", shared.name)),
+            )
+            .unwrap();
+            for text in [Some(example.as_str()), own].into_iter().flatten() {
+                let call = shared.parse_call(text).unwrap().unwrap();
+                assert_eq!(shared.problems(&call, "main"), Vec::<String>::new());
+            }
+        }
+    }
+
+    #[test]
+    fn callers_may_leave_triggers_out_but_add_none() {
+        let ci = local("ci.yml", "lkurcak/forge/.github/workflows/rust-ci.yml@v1").unwrap();
+        let problems = |on: &str| {
+            let text = format!(
+                "on:\n{on}\njobs:\n  ci:\n    uses: lkurcak/forge/.github/workflows/rust-ci.yml@v1\n"
+            );
+            ci.problems(&ci.parse_call(&text).unwrap().unwrap(), "trunk")
+        };
+        assert_eq!(
+            problems("  push:\n    branches: [trunk]"),
+            Vec::<String>::new()
+        );
+        assert_eq!(
+            problems("  - pull_request\n  - workflow_dispatch"),
+            Vec::<String>::new()
+        );
+        assert_eq!(
+            problems("  push:\n    branches: [trunk]\n    tags: [\"v*\"]"),
+            [".github/workflows/ci.yml: push.tags isn't among callers/rust-ci.yml's triggers"]
+        );
+        assert_eq!(
+            problems("  push:\n    branches: [main]"),
+            [
+                ".github/workflows/ci.yml: push.branches main isn't among callers/rust-ci.yml's triggers"
+            ]
+        );
+        assert_eq!(
+            problems("  push:"),
+            [
+                ".github/workflows/ci.yml: push without filters isn't among callers/rust-ci.yml's triggers"
+            ]
+        );
+        assert_eq!(
+            problems("  schedule:\n    - cron: \"0 0 * * *\""),
+            [
+                ".github/workflows/ci.yml: schedule 0 0 * * * isn't among callers/rust-ci.yml's triggers"
+            ]
+        );
+        assert_eq!(
+            problems("  release:"),
+            [".github/workflows/ci.yml: release isn't among callers/rust-ci.yml's triggers"]
+        );
+
+        let pr = local("pr.yml", "lkurcak/forge/.github/workflows/pr-title.yml@v1").unwrap();
+        let call = |types: &str| {
+            let text = format!(
+                "on:\n  pull_request:\n    types: [{types}]\njobs:\n  t:\n    uses: lkurcak/forge/.github/workflows/pr-title.yml@v1\n"
+            );
+            pr.problems(&pr.parse_call(&text).unwrap().unwrap(), "main")
+        };
+        assert_eq!(call("opened, edited, reopened"), Vec::<String>::new());
+        assert_eq!(call("opened, closed").len(), 1);
+    }
+
+    #[test]
+    fn a_caller_holds_the_call_alone() {
+        let ci = local("ci.yml", "lkurcak/forge/.github/workflows/rust-ci.yml@v1").unwrap();
+        let text = "on: pull_request\njobs:\n  ci:\n    uses: lkurcak/forge/.github/workflows/rust-ci.yml@v1\n  extra:\n    runs-on: ubuntu-latest\n";
+        let call = ci.parse_call(text).unwrap().unwrap();
+        assert_eq!(
+            ci.problems(&call, "main"),
+            [
+                ".github/workflows/ci.yml: job extra isn't the rust-ci call: move it to a workflow of its own, in own_workflows"
+            ]
+        );
+    }
+
+    #[test]
+    fn workflow_files_are_calls_or_listed() {
+        let workflows: Vec<SharedWorkflow> = all().into_iter().map(|(w, _)| w).collect();
+        let ci = include_str!("../.github/workflows/ci.yml");
+        let calls: Vec<Option<Call>> = workflows
+            .iter()
+            .map(|w| (w.name == "rust-ci").then(|| w.parse_call(ci).unwrap().unwrap()))
+            .collect();
+        let files = |names: &[&str]| names.iter().map(|&n| n.to_owned()).collect::<Vec<_>>();
+        let problems = |repo: &str, present: &[&str], own: &[&str]| {
+            file_problems(repo, &files(present), &workflows, &calls, &files(own))
+        };
+
+        assert_eq!(
+            problems(
+                "me/app",
+                &["ci.yml", "build.yml", "notes.md"],
+                &["build.yml"]
+            ),
+            Vec::<String>::new()
+        );
+        assert_eq!(
+            problems("me/app", &["ci.yml", "build.yml"], &[]),
+            ["build.yml: calls no shared workflow: move it into one, or list it in own_workflows"]
+        );
+        assert_eq!(
+            problems("me/app", &["release.yml"], &[]),
+            [
+                "release.yml: doesn't call rust-release: make it the call, or list it in own_workflows"
+            ]
+        );
+        assert_eq!(
+            problems("me/app", &["release.yml"], &["release.yml"]),
+            Vec::<String>::new()
+        );
+        assert_eq!(
+            problems("me/app", &["ci.yml"], &["ci.yml", "gone.yml"]).len(),
+            2
+        );
+        // The shared workflows themselves, where they're shared from.
+        assert_eq!(
+            problems("lkurcak/forge", &["rust-ci.yml", "t-ci.yml"], &[]),
+            Vec::<String>::new()
+        );
+        assert_eq!(problems("me/app", &["rust-ci.yml"], &[]).len(), 1);
     }
 
     #[test]

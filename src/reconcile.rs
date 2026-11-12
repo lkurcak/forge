@@ -7,6 +7,7 @@ use crate::cargo::Workspace;
 use crate::diff::subset;
 use crate::gh::Gh;
 use crate::manifest::{Actions, Manifest, Needs, Repo, Ruleset};
+use crate::workflow::Call;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
@@ -62,9 +63,6 @@ pub fn reconcile(gh: &Gh, manifest: &Manifest, repo: &Repo, mode: Mode) -> Outco
                 None
             }
         };
-        if let Some(call) = &call {
-            outcome.manual.extend(workflow.problems(call));
-        }
         calls.push(call);
     }
     for (file, pin, latest) in &manifest.pins {
@@ -86,6 +84,7 @@ pub fn reconcile(gh: &Gh, manifest: &Manifest, repo: &Repo, mode: Mode) -> Outco
         }
     };
     let public = actual["private"] == false;
+    workflows_drift(gh, manifest, repo, &calls, &actual, &mut outcome);
 
     let needs = manifest.needs(repo, &calls, public);
     outcome
@@ -160,6 +159,48 @@ pub fn reconcile(gh: &Gh, manifest: &Manifest, repo: &Repo, mode: Mode) -> Outco
     }
 
     outcome
+}
+
+/// What's wrong with the repo's workflows: its calls of shared workflows,
+/// files in .github/workflows that aren't calls or its own, and (on private
+/// repos, when `private_ci` watches their minutes) workflows that built a
+/// commit more than once. Only reported, since the fix is a commit.
+fn workflows_drift(
+    gh: &Gh,
+    manifest: &Manifest,
+    repo: &Repo,
+    calls: &[Option<Call>],
+    actual: &Value,
+    outcome: &mut Outcome,
+) {
+    let owner = manifest.owner.as_str();
+    let base = format!("repos/{owner}/{}", repo.name);
+    let public = actual["private"] == false;
+    let default_branch = actual["default_branch"].as_str().unwrap_or("main");
+    for (workflow, call) in manifest.workflows.iter().zip(calls) {
+        if let Some(call) = call {
+            outcome
+                .manual
+                .extend(workflow.problems(call, default_branch));
+        }
+    }
+    let full_name = format!("{owner}/{}", repo.name);
+    match gh.dir(&full_name, ".github/workflows") {
+        Ok(files) => outcome.manual.extend(crate::workflow::file_problems(
+            &full_name,
+            &files.unwrap_or_default(),
+            &manifest.workflows,
+            calls,
+            &repo.own_workflows,
+        )),
+        Err(err) => outcome.errors.push(format!("{err:#}")),
+    }
+    if !public && manifest.watches_minutes() {
+        match crate::runs::duplicates(gh, &base) {
+            Ok(found) => outcome.manual.extend(found),
+            Err(err) => outcome.errors.push(format!("{err:#}")),
+        }
+    }
 }
 
 impl Outcome {

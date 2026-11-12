@@ -1,25 +1,10 @@
 name: Rust release
 
 # The release pipeline shared by every Rust repo forge manages. Each repo's
-# release.yml calls it on a vX.Y.Z tag push, and, to release whenever a
-# version bump lands, on pushes to the default branch too:
-#
-#   on:
-#     push:
-#       tags: ["v[0-9]+.[0-9]+.[0-9]+"]
-#       branches: [main]
-#     workflow_dispatch:
-#   jobs:
-#     release:
-#       uses: lkurcak/forge/.github/workflows/rust-release.yml@v1
-#       permissions:
-#         contents: write
-#         id-token: write
-#         actions: write
-#       secrets: inherit
-#       with:
-#         crates-io: true
-#         binaries: true
+# release.yml calls it like callers/rust-release.yml in this repo: on a
+# vX.Y.Z tag push, and, to release whenever a version bump lands, on pushes
+# to the default branch too. A caller may leave triggers out but add no
+# others, which forge checks.
 #
 # The inputs are where a repo says what it ships; forge reads them to set up
 # what each one needs (secrets, the release environment) and to check the

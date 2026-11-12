@@ -1,0 +1,22 @@
+# How a repo calls rust-ci.yml, from .github/workflows/ci.yml. forge checks
+# each caller's triggers against these: a caller may leave some out, but add
+# no others ($default-branch stands for the repo's default branch). The inputs
+# are described in rust-ci.yml.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [$default-branch]
+  # Catches new stable Rust breaking a repo nobody touched, and keeps the
+  # default branch's build cache from expiring.
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    uses: lkurcak/forge/.github/workflows/rust-ci.yml@v1

@@ -127,6 +127,24 @@ impl Gh {
         Ok(Some(String::from_utf8(out.stdout)?))
     }
 
+    /// The names of the files in a directory of `repo`'s default branch, or
+    /// `None` if it doesn't exist.
+    pub fn dir(&self, repo: &str, path: &str) -> Result<Option<Vec<String>>> {
+        match self.get(&format!("repos/{repo}/contents/{path}")) {
+            Ok(entries) => Ok(Some(
+                entries
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter(|e| e["type"] == "file")
+                    .filter_map(|e| e["name"].as_str().map(str::to_owned))
+                    .collect(),
+            )),
+            Err(err) if format!("{err:#}").contains("(HTTP 404)") => Ok(None),
+            Err(err) => Err(err),
+        }
+    }
+
     /// The URL of the open PR from `branch` of `repo` (`owner/name`), if
     /// there's one.
     pub fn open_pr_from(&self, repo: &str, branch: &str) -> Result<Option<String>> {

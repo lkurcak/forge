@@ -144,6 +144,10 @@ struct RawRepo {
     settings: Map<String, Value>,
     #[serde(default)]
     actions: Map<String, Value>,
+    /// Files in .github/workflows that aren't calls of a shared workflow:
+    /// any other file there is reported.
+    #[serde(default)]
+    own_workflows: Vec<String>,
 }
 
 pub struct Manifest {
@@ -182,6 +186,8 @@ pub struct Repo {
     /// Targets the latest release must have a binary archive for, besides the
     /// ones its release workflow builds; `*` matches anything.
     pub release_targets: Vec<String>,
+    /// Workflow files of its own, which needn't call a shared workflow.
+    pub own_workflows: Vec<String>,
 }
 
 /// `[actions]`, one map per endpoint under
@@ -299,6 +305,7 @@ impl Manifest {
                 } else {
                     Vec::new()
                 },
+                own_workflows: repo.own_workflows,
             });
         }
 
@@ -356,6 +363,12 @@ impl Manifest {
             tags,
             pins: raw.pins.into_iter().map(|(f, p)| (f, p, None)).collect(),
         })
+    }
+
+    /// Whether private repos' calls must turn an input on (`private_ci`),
+    /// i.e. whether their Actions minutes are being watched.
+    pub const fn watches_minutes(&self) -> bool {
+        self.private_ci.is_some()
     }
 
     /// Looks up the latest release each pin should name.
