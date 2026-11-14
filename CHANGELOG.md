@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-11-14
+
+### Added
+
+- `forge web` checks each deployed site from outside, the way a browser or
+  phone meets it: its title, viewport and theme color, its icons (the one
+  iOS puts on the home screen too), a web app manifest that lets it install
+  as an app, and a health check that answers without a login. It prints the
+  version the health check says is deployed. Give a repo a `url` in the
+  manifest, and a `health` if it isn't `/healthz`.
+
 ## [0.9.2] - 2026-11-12
 
 ### Added
@@ -189,7 +200,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Prebuilt binaries for Windows, macOS and Linux are attached to each
   [GitHub release](https://github.com/lkurcak/forge/releases).
 
-[Unreleased]: https://github.com/lkurcak/forge/compare/v0.9.2...HEAD
+[Unreleased]: https://github.com/lkurcak/forge/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/lkurcak/forge/compare/v0.9.2...v0.10.0
 [0.9.2]: https://github.com/lkurcak/forge/compare/v0.9.1...v0.9.2
 [0.9.1]: https://github.com/lkurcak/forge/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/lkurcak/forge/compare/v0.8.0...v0.9.0
