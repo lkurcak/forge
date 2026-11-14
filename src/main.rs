@@ -14,6 +14,7 @@ mod reconcile;
 mod release;
 mod runs;
 mod stale;
+mod web;
 mod workflow;
 
 use std::fmt::Write as _;
@@ -115,6 +116,16 @@ enum Command {
         #[arg(long)]
         full: bool,
     },
+    /// Check each deployed site the way a browser or phone meets it: its
+    /// icons, the manifest that lets it install as an app, and a health
+    /// check that answers without a login.
+    ///
+    /// Only repos with a `url` in the manifest are checked. Exits with 1
+    /// when a check fails; warnings don't.
+    Web {
+        /// Repositories whose sites to check (default: every one with a url).
+        repos: Vec<String>,
+    },
     /// List open issues and PRs in any owned repo that have gone quiet.
     Stale {
         /// Days without activity before one counts as quiet.
@@ -142,6 +153,10 @@ fn run() -> Result<ExitCode> {
 
     let path = find_manifest(cli.manifest)?;
     let mut manifest = Manifest::load(&path)?;
+    // Sites are checked from outside, without GitHub.
+    if let Command::Web { repos } = &cli.command {
+        return web::run(&select(&manifest, repos)?, !repos.is_empty());
+    }
     let gh = Gh::new(&manifest.owner)?;
     manifest.fetch_workflows(|caller, uses| SharedWorkflow::fetch(&gh, caller, uses))?;
     if matches!(cli.command, Command::Check { .. } | Command::Bump { .. }) {
@@ -182,6 +197,7 @@ fn run() -> Result<ExitCode> {
             &forge_cache()?,
         ),
         Command::Init { .. } => unreachable!("handled before loading a manifest"),
+        Command::Web { .. } => unreachable!("handled before reading GitHub"),
     }
 }
 

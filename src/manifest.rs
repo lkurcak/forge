@@ -148,6 +148,18 @@ struct RawRepo {
     /// any other file there is reported.
     #[serde(default)]
     own_workflows: Vec<String>,
+    /// Where it's deployed: the page `forge web` checks.
+    url: Option<String>,
+    /// Its health check, if not `/healthz` on the page's host; `false` for a
+    /// site without one, like a static page.
+    health: Option<RawHealth>,
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum RawHealth {
+    Url(String),
+    On(bool),
 }
 
 pub struct Manifest {
@@ -188,6 +200,16 @@ pub struct Repo {
     pub release_targets: Vec<String>,
     /// Workflow files of its own, which needn't call a shared workflow.
     pub own_workflows: Vec<String>,
+    /// Where it's deployed, if it's a site.
+    pub site: Option<Site>,
+}
+
+/// A deployed site, for `forge web`.
+pub struct Site {
+    /// The page.
+    pub url: String,
+    /// Its health check, if it has one.
+    pub health: Option<String>,
 }
 
 /// `[actions]`, one map per endpoint under
@@ -279,6 +301,7 @@ impl Manifest {
         for (name, repo) in raw.repos {
             let actions = Actions::merge(raw.actions.clone(), repo.actions)
                 .with_context(|| format!("repos.{name}.actions"))?;
+            let site = Site::new(repo.url, repo.health).with_context(|| format!("repos.{name}"))?;
             let rulesets = repo
                 .rulesets
                 .as_ref()
@@ -294,18 +317,17 @@ impl Manifest {
                 own_settings: repo.settings,
                 actions,
                 rulesets,
-                release_tag_prefix: if repo.releases {
-                    repo.release_tag_prefix
-                        .or_else(|| raw.release_tag_prefix.clone())
-                } else {
-                    None
-                },
+                release_tag_prefix: repo
+                    .release_tag_prefix
+                    .or_else(|| raw.release_tag_prefix.clone())
+                    .filter(|_| repo.releases),
                 release_targets: if repo.releases {
                     repo.release_targets
                 } else {
                     Vec::new()
                 },
                 own_workflows: repo.own_workflows,
+                site,
             });
         }
 
@@ -493,6 +515,30 @@ impl Manifest {
     }
 }
 
+impl Site {
+    fn new(url: Option<String>, health: Option<RawHealth>) -> Result<Option<Self>> {
+        let Some(url) = url else {
+            if health.is_some() {
+                bail!("health needs a url");
+            }
+            return Ok(None);
+        };
+        let http = |url: &str| url.starts_with("https://") || url.starts_with("http://");
+        if !http(&url) {
+            bail!("url {url:?} isn't an http(s) URL");
+        }
+        let health = match health {
+            None | Some(RawHealth::On(true)) => {
+                Some(crate::web::resolve(&url, "/healthz").context("resolving /healthz")?)
+            }
+            Some(RawHealth::On(false)) => None,
+            Some(RawHealth::Url(health)) if http(&health) => Some(health),
+            Some(RawHealth::Url(health)) => bail!("health {health:?} isn't an http(s) URL"),
+        };
+        Ok(Some(Self { url, health }))
+    }
+}
+
 impl Actions {
     fn merge(top: Map<String, Value>, own: Map<String, Value>) -> Result<Self> {
         let mut actions = Self::split(top)?;
@@ -638,6 +684,60 @@ mod tests {
         assert_eq!(off.private_ci, None);
         assert_eq!(light.private_ci.as_deref(), Some("light"));
         assert!(typo.to_string().contains("lite"), "{typo}");
+    }
+
+    #[test]
+    fn reads_sites() {
+        let dir = std::env::temp_dir().join(format!("forge-sites-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("forge.toml");
+        let load = |repos: &str| {
+            fs::write(&path, format!("owner = \"me\"\n{repos}")).unwrap();
+            Manifest::load(&path)
+        };
+        let sites = load(
+            "[repos.app]\nurl = \"https://app.example.com/\"\n\
+             [repos.api]\nurl = \"https://example.com/api/\"\nhealth = \"https://example.com/api/health\"\n\
+             [repos.static]\nurl = \"https://example.com/static/\"\nhealth = false\n\
+             [repos.lib]\n",
+        )
+        .unwrap();
+        let no_url = load("[repos.x]\nhealth = false\n").map(|_| ()).unwrap_err();
+        let not_http = load("[repos.x]\nurl = \"example.com\"\n")
+            .map(|_| ())
+            .unwrap_err();
+        fs::remove_dir_all(&dir).unwrap();
+
+        let site = |name: &str| {
+            let repo = sites.repos.iter().find(|r| r.name == name).unwrap();
+            repo.site
+                .as_ref()
+                .map(|s| (s.url.as_str(), s.health.as_deref()))
+        };
+        assert_eq!(
+            site("app"),
+            Some((
+                "https://app.example.com/",
+                Some("https://app.example.com/healthz")
+            ))
+        );
+        assert_eq!(
+            site("api"),
+            Some((
+                "https://example.com/api/",
+                Some("https://example.com/api/health")
+            ))
+        );
+        assert_eq!(site("static"), Some(("https://example.com/static/", None)));
+        assert_eq!(site("lib"), None);
+        assert!(
+            format!("{no_url:#}").contains("health needs a url"),
+            "{no_url:#}"
+        );
+        assert!(
+            format!("{not_http:#}").contains("isn't an http(s) URL"),
+            "{not_http:#}"
+        );
     }
 
     #[test]

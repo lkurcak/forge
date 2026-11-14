@@ -4,8 +4,8 @@ Keeps a GitHub account's repositories in line with one manifest. It sets what
 the API can set: repo settings, Actions permissions, rulesets, variables,
 secrets and deployment environments. It checks and reports what needs a
 commit or a person to fix: shared CI workflows, Cargo lints, Dockerfiles,
-releases that didn't reach crates.io, Homebrew or winget, and open Dependabot
-alerts.
+releases that didn't reach crates.io, Homebrew or winget, open Dependabot
+alerts, and deployed sites without icons, an app manifest or a health check.
 
 ## Install
 
@@ -52,6 +52,7 @@ forge stale [--days 90]     # open issues and PRs nobody has touched in that lon
 forge bump [--dry-run] [REPO…]  # open PRs moving [pins] to the latest release
 forge deps [--dry-run] [REPO…]  # a PR per Rust repo updating Cargo.lock, tested here first
 forge leaks [--public] [--full] [REPO…]  # secrets committed to private repos
+forge web [REPO…]           # deployed sites' icons, app manifest and health check
 forge init [--owner NAME]   # write a starter manifest
 ```
 
@@ -281,6 +282,44 @@ list the id to stop reporting it:
 [leaks]
 ignore = ["home-server:2f1c…:docker/.env:generic-api-key:12"]
 ```
+
+### Deployed sites
+
+A repo deployed as a website can give the address of its page:
+
+```toml
+[repos.shop]
+url = "https://shop.example.com/"
+health = "https://shop.example.com/health"   # default: /healthz on the url's host
+```
+
+`forge web` fetches each such page the way a browser or phone meets it,
+from this machine and without cookies, and reports:
+
+- a missing `<title>`, `<meta name="theme-color">`, or
+  `<meta name="viewport">` with `width=device-width` (without it, phones
+  show a zoomed-out desktop page);
+- an icon that isn't an image: each `<link rel="icon">`, or else
+  `/favicon.ico`. A single-page app's page, answering for any path, doesn't
+  count;
+- no icon for iOS's home screen: `<link rel="apple-touch-icon">`, or else
+  `/apple-touch-icon.png`, a square PNG at least 180 pixels wide. Transparent
+  pixels get a warning, since iOS shows them as black;
+- no web app manifest (`<link rel="manifest">`), which lets browsers install
+  the site as an app, or one lacking `name`, `short_name`, `start_url`,
+  `display` (`standalone`, `fullscreen` or `minimal-ui`), `theme_color`,
+  `background_color`, or icons at 192x192 and 512x512 and a maskable one,
+  each there and the size it says. A Content-Type other than
+  `application/manifest+json` (or `application/json`) gets a warning;
+- a health check that doesn't answer 2xx to anyone, or answers with a
+  redirect (to a login, say) or an HTML page. If it answers JSON with a
+  `version`, and maybe a `commit`, forge prints them next to the repo, which
+  tells you whether a merge has been deployed; if not, that's a warning.
+
+`health = false` leaves the health check out, for a static site. Only repos
+with a `url` are checked, and forge exits 1 if a check fails; warnings
+don't. Uptime and certificate expiry are better left to an uptime monitor,
+which checks every minute rather than when you run forge.
 
 ### Merging on green
 
