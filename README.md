@@ -200,7 +200,10 @@ moves along with compatible changes:
   instead of testing on macOS and Windows. Pushes to the default branch
   publish it as `latest`, and while the registry lacks Cargo.toml's version,
   as `X.Y.Z` and `X.Y` too: merging a version bump releases the image, once,
-  and tags build nothing. With `light: true`, for repos
+  and tags build nothing. The build gets the commit as the build arg
+  `GIT_COMMIT`: a Dockerfile can declare `ARG GIT_COMMIT` in its last stage
+  and pass it on as an `ENV`, so the app's health check can report it
+  without making earlier layers miss the cache. With `light: true`, for repos
   whose Actions minutes are billed (private ones), it's a sanity check: one
   Linux job on pull requests (fmt, clippy and, unless `tests: false`, the
   tests), and on pushes only the image, for linux/amd64 unless
