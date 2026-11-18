@@ -302,7 +302,10 @@ jobs:
   # right here instead. Light builds images on pushes only. Of pushes, only
   # the default branch's build one. On FORGE_RUNNER, amd64 builds on the
   # BuildKit FORGE_BUILDKIT names, if set (a runner without a Docker
-  # daemon), which keeps its own layer cache instead of GitHub's.
+  # daemon), which keeps its own layer cache instead of GitHub's. The build
+  # arg GIT_COMMIT is the commit being built, for a Dockerfile that declares
+  # it (ARG GIT_COMMIT) to tell the app, so its health check can say what's
+  # deployed.
   container:
     if: >-
       ${{ !cancelled() && !failure() && inputs.container
@@ -372,6 +375,7 @@ jobs:
           context: .
           platforms: ${{ matrix.platform }}
           labels: ${{ steps.metadata.outputs.labels }}
+          build-args: GIT_COMMIT=${{ github.sha }}
           tags: ${{ env.PUSH == 'true' && env.ALONE == 'true' && steps.metadata.outputs.tags || '' }}
           outputs: >-
             ${{ env.PUSH != 'true' && 'type=cacheonly'
