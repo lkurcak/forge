@@ -11,7 +11,7 @@ use serde_json::Value;
 use crate::days;
 use crate::gh::Gh;
 
-/// The search API stops at 1000 results.
+/// The search API stops at 1000 results, for issues and for PRs each.
 const PAGES: u32 = 10;
 
 /// Lines per repo, each issue or PR quiet for at least `min_days` and
@@ -29,18 +29,23 @@ pub fn find(
         write!(query, "+-label:%22{}%22", label.replace(' ', "+"))?;
     }
 
+    // The search API wants issues and PRs asked for separately.
     let mut items = Vec::new();
-    for page in 1..=PAGES {
-        let found = gh.get(&format!(
-            "search/issues?q={query}&sort=updated&order=asc&per_page=100&page={page}"
-        ))?;
-        let batch = found["items"].as_array().cloned().unwrap_or_default();
-        let last = batch.len() < 100;
-        items.extend(batch);
-        if last {
-            break;
+    for kind in ["is:issue", "is:pr"] {
+        for page in 1..=PAGES {
+            let found = gh.get(&format!(
+                "search/issues?q={query}+{kind}&sort=updated&order=asc&per_page=100&page={page}"
+            ))?;
+            let batch = found["items"].as_array().cloned().unwrap_or_default();
+            let last = batch.len() < 100;
+            items.extend(batch);
+            if last {
+                break;
+            }
         }
     }
+    // Quietest first, issues and PRs together. RFC 3339 times in UTC sort as text.
+    items.sort_by(|a, b| a["updated_at"].as_str().cmp(&b["updated_at"].as_str()));
 
     let mut repos: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for item in &items {
