@@ -108,6 +108,27 @@ rulesets = ["protect-default-branch"]
   `rust-ci.yml`'s `light`: only private repos' Actions minutes are billed.
   Off by default, so every repo runs full CI. Calls of a workflow without
   that input aren't affected.
+- `[runner]` runs private repos' Linux jobs on self-hosted runners, whose
+  minutes GitHub doesn't bill:
+
+  ```toml
+  [runner]
+  label = "home"
+  # Optional: for runners without a Docker daemon, the buildkitd they
+  # build container images on.
+  buildkit = "tcp://buildkitd:1234"
+  ```
+
+  forge sets each private repo's `FORGE_RUNNER` variable to `label` (and
+  `FORGE_BUILDKIT` to `buildkit`), and the shared workflows' Linux jobs run
+  on `${{ vars.FORGE_RUNNER || 'ubuntu-latest' }}`; macOS, Windows and
+  arm64 jobs stay on GitHub's. A personal account's runners each belong to
+  one repo, so every private repo whose workflows run there (a call of a
+  shared workflow that doesn't skip private repos, or `own_workflows`)
+  must have one online with that label, or forge reports it. Its own
+  workflows can use the same `runs-on` expression. Public repos must have
+  neither the variables nor any self-hosted runner: anyone can open a pull
+  request there, and its jobs would run on your machine.
 - `release_tag_prefix`: the latest GitHub release of each repo must be
   tagged this plus `X.Y.Z`. A repo can set its own, or `releases = false` for
   releases that aren't versions of it (a Homebrew tap's bottles, say).

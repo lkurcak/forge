@@ -6,7 +6,7 @@ use serde_json::{Map, Value, json};
 use crate::cargo::Workspace;
 use crate::diff::subset;
 use crate::gh::Gh;
-use crate::manifest::{Actions, Manifest, Needs, Repo, Ruleset};
+use crate::manifest::{Actions, Manifest, Needs, Repo, Ruleset, Runners};
 use crate::workflow::{Call, Permissions};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -119,9 +119,13 @@ pub fn reconcile(gh: &Gh, manifest: &Manifest, repo: &Repo, mode: Mode) -> Outco
         skip_protection(&needs, &mut outcome);
     }
 
-    if !needs.variables.is_empty() {
+    if !needs.variables.is_empty() || !needs.forbidden_variables.is_empty() {
         let result = variables_drift(gh, mode, &base, &needs);
         outcome.record(result);
+    }
+
+    if let Some(runners) = &needs.runners {
+        runners_drift(gh, &base, runners, &mut outcome);
     }
 
     if !needs.secrets.is_empty() || !needs.forbidden_secrets.is_empty() {
@@ -539,7 +543,67 @@ fn variables_drift(gh: &Gh, mode: Mode, base: &str, needs: &Needs) -> Result<Vec
         }
     }
 
+    for (name, why) in &needs.forbidden_variables {
+        if actual.iter().any(|v| v["name"] == name.as_str()) {
+            drift.push(format!("variable {name}: shouldn't exist ({why})"));
+            if mode.applies() {
+                gh.api("DELETE", &format!("{base}/actions/variables/{name}"), None)?;
+            }
+        }
+    }
+
     Ok(drift)
+}
+
+fn runners_drift(gh: &Gh, base: &str, runners: &Runners, outcome: &mut Outcome) {
+    match gh.get(&format!("{base}/actions/runners?per_page=100")) {
+        Ok(actual) => outcome.manual.extend(runner_problems(runners, &actual)),
+        Err(err) => outcome.errors.push(format!("{err:#}")),
+    }
+}
+
+/// What's wrong with a repo's self-hosted runners, from
+/// `/actions/runners`. Only reported: registering or removing one happens
+/// on the machine it runs on.
+fn runner_problems(needs: &Runners, actual: &Value) -> Vec<String> {
+    let runners = actual["runners"].as_array().map_or(&[][..], Vec::as_slice);
+    match needs {
+        Runners::None => runners
+            .iter()
+            .map(|r| {
+                format!(
+                    "runner {}: a public repo's, where anyone's pull request could run code on it; remove it",
+                    r["name"].as_str().unwrap_or("?")
+                )
+            })
+            .collect(),
+        Runners::Online(label) => {
+            let labeled: Vec<&Value> = runners
+                .iter()
+                .filter(|r| {
+                    r["labels"]
+                        .as_array()
+                        .is_some_and(|l| l.iter().any(|l| l["name"] == label.as_str()))
+                })
+                .collect();
+            if labeled.is_empty() {
+                vec![format!(
+                    "runner: none labeled {label}, so its jobs wait for one; register one"
+                )]
+            } else if labeled.iter().all(|r| r["status"] != "online") {
+                let names: Vec<&str> = labeled
+                    .iter()
+                    .map(|r| r["name"].as_str().unwrap_or("?"))
+                    .collect();
+                vec![format!(
+                    "runner {}: offline, so jobs labeled {label} wait for it",
+                    names.join(", ")
+                )]
+            } else {
+                Vec::new()
+            }
+        }
+    }
 }
 
 /// Rulesets, and environments' deployment policies, need GitHub Pro on private
@@ -703,4 +767,56 @@ fn secrets_drift(
     );
 
     Ok(drift)
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+
+    fn runners(list: &[(&str, &str, &[&str])]) -> Value {
+        let runners: Vec<Value> = list
+            .iter()
+            .map(|(name, status, labels)| {
+                let labels: Vec<Value> = labels.iter().map(|l| json!({ "name": l })).collect();
+                json!({ "name": name, "status": status, "labels": labels })
+            })
+            .collect();
+        json!({ "total_count": runners.len(), "runners": runners })
+    }
+
+    #[test]
+    fn private_repos_need_one_labeled_runner_online() {
+        let home = Runners::Online("home".to_owned());
+        let online = runners(&[
+            ("home-app", "online", &["self-hosted", "home"]),
+            ("old", "offline", &["self-hosted", "home"]),
+        ]);
+        assert_eq!(runner_problems(&home, &online), Vec::<String>::new());
+
+        let offline = runners(&[("home-app", "offline", &["self-hosted", "home"])]);
+        let problems = runner_problems(&home, &offline);
+        assert_eq!(problems.len(), 1);
+        assert!(problems[0].contains("home-app: offline"), "{problems:?}");
+
+        let other = runners(&[("gpu", "online", &["self-hosted", "gpu"])]);
+        let problems = runner_problems(&home, &other);
+        assert!(problems[0].contains("none labeled home"), "{problems:?}");
+        assert_eq!(runner_problems(&home, &runners(&[])).len(), 1);
+    }
+
+    #[test]
+    fn public_repos_need_no_runner_at_all() {
+        assert_eq!(
+            runner_problems(&Runners::None, &runners(&[])),
+            Vec::<String>::new()
+        );
+        let problems = runner_problems(
+            &Runners::None,
+            &runners(&[("home-app", "online", &["self-hosted"])]),
+        );
+        assert_eq!(problems.len(), 1);
+        assert!(problems[0].contains("home-app"), "{problems:?}");
+    }
 }

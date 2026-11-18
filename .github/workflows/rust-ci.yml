@@ -52,6 +52,13 @@ name: Rust CI
 # The weekly run, on the default branch, also leaves a build cache there for
 # pull requests to start from; it's the only run that saves one.
 #
+# Linux jobs run on GitHub's ubuntu-latest, or on the runners the repo's
+# FORGE_RUNNER variable names (a runs-on label) where it's set: forge sets it
+# on private repos from the manifest's [runner], for runners of your own,
+# whose minutes aren't billed. FORGE_BUILDKIT, if set too, is the BuildKit
+# those runners build images on, for runners without a Docker daemon.
+# macOS, Windows and arm64 jobs stay on GitHub's runners.
+#
 # A pull request from `forge deps` (branch forge/deps) runs nothing either,
 # unless the repo is no-std: it only touches Cargo.lock, and forge ran clippy
 # and the tests on it before opening it, which its forge/deps status says.
@@ -157,7 +164,7 @@ jobs:
     if: ${{ !inputs.light }}
     permissions:
       contents: read
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.FORGE_RUNNER || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -169,7 +176,7 @@ jobs:
     if: ${{ !inputs.light }}
     permissions:
       contents: read
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.FORGE_RUNNER || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -190,7 +197,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: ${{ fromJSON(inputs.container && '["ubuntu-latest"]' || '["ubuntu-latest", "macos-latest", "windows-latest"]') }}
+        os: >-
+          ${{ fromJSON(format(inputs.container && '["{0}"]'
+          || '["{0}", "macos-latest", "windows-latest"]',
+          vars.FORGE_RUNNER || 'ubuntu-latest')) }}
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
@@ -207,7 +217,7 @@ jobs:
     if: ${{ !inputs.light }}
     permissions:
       contents: read
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.FORGE_RUNNER || 'ubuntu-latest' }}
     env:
       RUSTDOCFLAGS: -D warnings
     steps:
@@ -227,7 +237,7 @@ jobs:
     if: ${{ !inputs.light }}
     permissions:
       contents: read
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.FORGE_RUNNER || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -246,7 +256,7 @@ jobs:
     if: ${{ !inputs.light }}
     permissions:
       contents: read
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.FORGE_RUNNER || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v7
       - name: Read rust-version
@@ -277,7 +287,7 @@ jobs:
     permissions:
       contents: read
     if: inputs.no-std && !inputs.light
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.FORGE_RUNNER || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -290,7 +300,9 @@ jobs:
   # alone; container-publish tags them together as one multi-arch image.
   # Built alone (light, without arm64), the image is pushed under its tags
   # right here instead. Light builds images on pushes only. Of pushes, only
-  # the default branch's build one.
+  # the default branch's build one. On FORGE_RUNNER, amd64 builds on the
+  # BuildKit FORGE_BUILDKIT names, if set (a runner without a Docker
+  # daemon), which keeps its own layer cache instead of GitHub's.
   container:
     if: >-
       ${{ !cancelled() && !failure() && inputs.container
@@ -298,14 +310,17 @@ jobs:
       && (github.event_name != 'push'
       || github.ref == format('refs/heads/{0}', github.event.repository.default_branch)) }}
     needs: [fmt, clippy, test, doc, package, msrv]
+    name: container (${{ matrix.platform }})
     strategy:
       fail-fast: false
       matrix:
         include: >-
-          ${{ fromJSON(inputs.light && !inputs.arm64
-          && '[{"platform": "linux/amd64", "runner": "ubuntu-latest"}]'
-          || '[{"platform": "linux/amd64", "runner": "ubuntu-latest"},
-          {"platform": "linux/arm64", "runner": "ubuntu-24.04-arm"}]') }}
+          ${{ fromJSON(format(
+          '[{{"platform": "linux/amd64", "runner": "{0}", "buildkit": "{1}"}}{2}]',
+          vars.FORGE_RUNNER || 'ubuntu-latest', vars.FORGE_BUILDKIT,
+          !(inputs.light && !inputs.arm64)
+          && ', {"platform": "linux/arm64", "runner": "ubuntu-24.04-arm", "buildkit": ""}'
+          || '')) }}
     runs-on: ${{ matrix.runner }}
     env:
       PUSH: ${{ github.event_name == 'push' }}
@@ -313,6 +328,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: docker/setup-buildx-action@v4
+        with:
+          driver: ${{ matrix.buildkit && 'remote' || 'docker-container' }}
+          endpoint: ${{ matrix.buildkit }}
       - if: env.PUSH == 'true'
         uses: docker/login-action@v4
         with:
@@ -359,8 +377,12 @@ jobs:
             ${{ env.PUSH != 'true' && 'type=cacheonly'
             || env.ALONE == 'true' && 'type=image,push=true'
             || format('type=image,name={0},push-by-digest=true,name-canonical=true,push=true', env.IMAGE) }}
-          cache-from: type=gha,scope=container-${{ steps.arch.outputs.arch }}
-          cache-to: type=gha,mode=max,scope=container-${{ steps.arch.outputs.arch }}
+          cache-from: >-
+            ${{ !matrix.buildkit
+            && format('type=gha,scope=container-{0}', steps.arch.outputs.arch) || '' }}
+          cache-to: >-
+            ${{ !matrix.buildkit
+            && format('type=gha,mode=max,scope=container-{0}', steps.arch.outputs.arch) || '' }}
       - if: env.PUSH == 'true' && env.ALONE != 'true'
         name: Export digest
         env:
@@ -381,7 +403,7 @@ jobs:
       ${{ !cancelled() && needs.container.result == 'success' && inputs.container
       && github.event_name == 'push' && !(inputs.light && !inputs.arm64) }}
     needs: container
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.FORGE_RUNNER || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/download-artifact@v8
@@ -390,6 +412,9 @@ jobs:
           pattern: digest-*
           merge-multiple: true
       - uses: docker/setup-buildx-action@v4
+        with:
+          driver: ${{ vars.FORGE_BUILDKIT && 'remote' || 'docker-container' }}
+          endpoint: ${{ vars.FORGE_BUILDKIT }}
       - uses: docker/login-action@v4
         with:
           registry: ghcr.io
@@ -446,7 +471,7 @@ jobs:
     needs: [fmt, clippy, test, doc, package, msrv, no-std, container, container-publish]
     permissions:
       contents: read
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.FORGE_RUNNER || 'ubuntu-latest' }}
     steps:
       - if: ${{ !inputs.light }}
         name: Every job passed or was skipped
