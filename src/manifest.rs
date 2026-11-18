@@ -52,6 +52,8 @@ struct RawManifest {
     /// public ones leave off, like rust-ci's `light`: only private repos'
     /// Actions minutes are billed.
     private_ci: Option<String>,
+    /// Runners of your own that private repos' Linux jobs run on.
+    runner: Option<Runner>,
     /// Workflow file repos call a shared workflow from, to its `uses:`
     /// reference. forge reads the shared workflow at that reference.
     #[serde(default)]
@@ -69,6 +71,25 @@ struct RawManifest {
     /// Workflow file to the inputs in it that pin another repo's release.
     #[serde(default)]
     pins: BTreeMap<String, Pin>,
+}
+
+/// The repo variable the shared workflows read their Linux jobs' `runs-on`
+/// label from, falling back to GitHub's `ubuntu-latest`.
+pub const RUNNER_VARIABLE: &str = "FORGE_RUNNER";
+/// The repo variable naming the buildkitd those runners build images on.
+pub const BUILDKIT_VARIABLE: &str = "FORGE_BUILDKIT";
+
+/// `[runner]`: self-hosted runners private repos' Linux jobs run on, whose
+/// minutes GitHub doesn't bill. A personal account's runners each belong to
+/// one repo, so every private repo running workflows needs its own.
+#[derive(Deserialize, Clone)]
+#[serde(deny_unknown_fields)]
+pub struct Runner {
+    /// The `runs-on` label they carry.
+    pub label: String,
+    /// The buildkitd they build images on, like `tcp://buildkitd:1234`, for
+    /// runners without a Docker daemon.
+    pub buildkit: Option<String>,
 }
 
 /// `[stale]`: what `forge stale` leaves out.
@@ -177,6 +198,8 @@ pub struct Manifest {
     pub private_protection: bool,
     /// The input private repos' calls must turn on (`private_ci`).
     private_ci: Option<String>,
+    /// Where private repos' Linux jobs run (`[runner]`).
+    runner: Option<Runner>,
     tags: BTreeMap<String, Tag>,
     /// `[pins]`, by workflow file, with the release each should name once
     /// [`Self::fetch_pins`] has looked it up.
@@ -253,6 +276,10 @@ pub struct Needs {
     pub settings: Map<String, Value>,
     /// Actions variables and their values.
     pub variables: BTreeMap<String, String>,
+    /// Actions variables that must not exist, and why.
+    pub forbidden_variables: BTreeMap<String, String>,
+    /// The self-hosted runners it must have (`[runner]`), if forge checks.
+    pub runners: Option<Runners>,
     /// Actions secrets that must exist and the local files holding their values.
     pub secrets: BTreeMap<String, PathBuf>,
     /// Actions secrets that must not exist.
@@ -269,6 +296,15 @@ pub struct Needs {
     pub lints: Lints,
     /// Commands some `RUN` instruction of the root Dockerfile must run.
     pub dockerfile_runs: Vec<String>,
+}
+
+/// The self-hosted runners a repo must have.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Runners {
+    /// None: a public repo, where anyone's pull request could run code on one.
+    None,
+    /// One online carrying this label, for the jobs waiting for it.
+    Online(String),
 }
 
 #[derive(Clone)]
@@ -382,6 +418,7 @@ impl Manifest {
             leaks: raw.leaks,
             private_protection: raw.private_protection,
             private_ci: raw.private_ci,
+            runner: raw.runner,
             tags,
             pins: raw.pins.into_iter().map(|(f, p)| (f, p, None)).collect(),
         })
@@ -473,6 +510,10 @@ impl Manifest {
             }
         }
 
+        if let Some(runner) = &self.runner {
+            self.runner_needs(runner, repo, calls, public, &mut needs);
+        }
+
         for tag in needs.tags.clone().iter().filter_map(|t| self.tags.get(t)) {
             needs.variables.extend(tag.variables.clone());
             needs.secrets.extend(tag.secrets.clone());
@@ -512,6 +553,57 @@ impl Manifest {
             }
         }
         needs
+    }
+}
+
+impl Manifest {
+    /// With `[runner]`, private repos get the variables pointing their jobs at
+    /// it, and must have a runner online if any of their workflows runs
+    /// there. Public repos must have neither: anyone can open a pull
+    /// request, and its jobs would run on your machine.
+    fn runner_needs(
+        &self,
+        runner: &Runner,
+        repo: &Repo,
+        calls: &[Option<Call>],
+        public: bool,
+        needs: &mut Needs,
+    ) {
+        if public {
+            for name in [RUNNER_VARIABLE, BUILDKIT_VARIABLE] {
+                needs.forbidden_variables.insert(
+                    name.to_owned(),
+                    "public repos' jobs stay on GitHub's runners".to_owned(),
+                );
+            }
+            needs.runners = Some(Runners::None);
+            return;
+        }
+        needs
+            .variables
+            .insert(RUNNER_VARIABLE.to_owned(), runner.label.clone());
+        match &runner.buildkit {
+            Some(buildkit) => {
+                needs
+                    .variables
+                    .insert(BUILDKIT_VARIABLE.to_owned(), buildkit.clone());
+            }
+            None => {
+                needs.forbidden_variables.insert(
+                    BUILDKIT_VARIABLE.to_owned(),
+                    "[runner] names no buildkit".to_owned(),
+                );
+            }
+        }
+        let runs_here = !repo.own_workflows.is_empty()
+            || self
+                .workflows
+                .iter()
+                .zip(calls)
+                .any(|(workflow, call)| call.is_some() && !workflow.skips_private());
+        if runs_here {
+            needs.runners = Some(Runners::Online(runner.label.clone()));
+        }
     }
 }
 
@@ -684,6 +776,57 @@ mod tests {
         assert_eq!(off.private_ci, None);
         assert_eq!(light.private_ci.as_deref(), Some("light"));
         assert!(typo.to_string().contains("lite"), "{typo}");
+    }
+
+    #[test]
+    fn runner_serves_private_repos_running_workflows() {
+        let dir = std::env::temp_dir().join(format!("forge-runner-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("forge.toml");
+        fs::write(
+            &path,
+            "owner = \"me\"\n\
+             [runner]\nlabel = \"home\"\nbuildkit = \"tcp://buildkitd:1234\"\n\
+             [workflows]\n\
+             \"ci.yml\" = \"lkurcak/forge/.github/workflows/rust-ci.yml@v1\"\n\
+             \"pr.yml\" = \"lkurcak/forge/.github/workflows/pr-title.yml@v1\"\n\
+             [repos.app]\n[repos.docs]\n[repos.tool]\nown_workflows = [\"build.yml\"]\n",
+        )
+        .unwrap();
+        let mut manifest = Manifest::load(&path).unwrap();
+        manifest.fetch_workflows(crate::workflow::local).unwrap();
+        fs::remove_dir_all(&dir).unwrap();
+
+        let call = |workflow: usize, file: &str| {
+            let shared = &manifest.workflows[workflow];
+            let text =
+                format!("jobs:\n  x:\n    uses: lkurcak/forge/.github/workflows/{file}@v1\n");
+            shared.parse_call(&text).unwrap()
+        };
+        let ci = [call(0, "rust-ci.yml"), None];
+        let pr = [None, call(1, "pr-title.yml")];
+        let none = [None, None];
+        let repo = |name: &str| manifest.repos.iter().find(|r| r.name == name).unwrap();
+        let home = Some(Runners::Online("home".to_owned()));
+
+        let app = manifest.needs(repo("app"), &ci, false);
+        assert_eq!(app.variables[RUNNER_VARIABLE], "home");
+        assert_eq!(app.variables[BUILDKIT_VARIABLE], "tcp://buildkitd:1234");
+        assert!(app.forbidden_variables.is_empty());
+        assert_eq!(app.runners, home);
+        // pr-title skips private repos, so nothing runs that needs a runner.
+        let docs = manifest.needs(repo("docs"), &pr, false);
+        assert_eq!(docs.variables[RUNNER_VARIABLE], "home");
+        assert_eq!(docs.runners, None);
+        assert_eq!(manifest.needs(repo("tool"), &none, false).runners, home);
+
+        let public = manifest.needs(repo("app"), &ci, true);
+        assert!(public.variables.is_empty());
+        assert_eq!(
+            public.forbidden_variables.keys().collect::<Vec<_>>(),
+            [BUILDKIT_VARIABLE, RUNNER_VARIABLE]
+        );
+        assert_eq!(public.runners, Some(Runners::None));
     }
 
     #[test]

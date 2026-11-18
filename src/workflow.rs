@@ -41,6 +41,8 @@ pub struct SharedWorkflow {
     triggers: Option<Value>,
     /// The most each permission is asked for, by the workflow or any job.
     permissions: Permissions,
+    /// Every job is skipped on private repos, like pr-title's.
+    skips_private: bool,
 }
 
 /// A repo's call of a shared workflow.
@@ -260,6 +262,15 @@ impl SharedWorkflow {
                 permissions.add(&asked);
             }
         }
+        // A job's `if` turning it off on private repos, as pr-title's does.
+        let skips_private = yaml["jobs"].as_object().is_some_and(|jobs| {
+            !jobs.is_empty()
+                && jobs.values().all(|job| {
+                    job["if"]
+                        .as_str()
+                        .is_some_and(|c| c.contains("!github.event.repository.private"))
+                })
+        });
         let triggers = example
             .map(|example| {
                 let yaml: Value = serde_yaml_ng::from_str(example)
@@ -300,7 +311,14 @@ impl SharedWorkflow {
             targets,
             triggers,
             permissions,
+            skips_private,
         })
+    }
+
+    /// Whether every job is skipped on private repos, so it needs no runner
+    /// there.
+    pub const fn skips_private(&self) -> bool {
+        self.skips_private
     }
 
     /// The file name repos call it from, like `ci.yml`.
@@ -323,7 +341,7 @@ impl SharedWorkflow {
             .with_context(|| format!("reading {repo}'s {}", self.caller))
     }
 
-    fn parse_call(&self, text: &str) -> Result<Option<Call>> {
+    pub(crate) fn parse_call(&self, text: &str) -> Result<Option<Call>> {
         let yaml: Value = serde_yaml_ng::from_str(text)?;
         let calls: Vec<(&Value, &str)> = yaml["jobs"]
             .as_object()
@@ -690,6 +708,19 @@ jobs:
         let call = CALL.replace("@v1", "@main").replace("winget:", "wignet:");
         let release = shared.parse_call(&call).unwrap().unwrap();
         assert_eq!(shared.problems(&release, "main", &token()).len(), 2);
+    }
+
+    #[test]
+    fn knows_which_workflows_skip_private_repos() {
+        let uses = |name: &str| format!("lkurcak/forge/.github/workflows/{name}.yml@v1");
+        assert!(local("pr.yml", &uses("pr-title")).unwrap().skips_private());
+        for (caller, name) in [("ci.yml", "rust-ci"), ("t.yml", "t-ci")] {
+            assert!(
+                !local(caller, &uses(name)).unwrap().skips_private(),
+                "{name}"
+            );
+        }
+        assert!(!shared().skips_private());
     }
 
     #[test]

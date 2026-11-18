@@ -74,7 +74,7 @@ jobs:
   # dispatch does. Then merging a PR that bumps the version releases it.
   tag:
     if: github.ref_type == 'branch' && github.ref_name == github.event.repository.default_branch
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.FORGE_RUNNER || 'ubuntu-latest' }}
     permissions:
       contents: write
       actions: write
@@ -110,7 +110,7 @@ jobs:
   # default-branch push skips it.
   verify:
     if: github.ref_type == 'tag'
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.FORGE_RUNNER || 'ubuntu-latest' }}
     permissions:
       contents: read
     outputs:
@@ -186,6 +186,8 @@ jobs:
         env:
           BINARIES: ${{ inputs.binaries }}
           WINGET: ${{ inputs.winget }}
+          # A runs-on label for x86_64 Linux, like the jobs' (see rust-ci.yml).
+          FORGE_RUNNER: ${{ vars.FORGE_RUNNER }}
         run: |
           targets=
           [ "$BINARIES" = true ] && targets="$targets $BINARIES_TARGETS"
@@ -195,7 +197,7 @@ jobs:
             case "$target" in
               *-apple-darwin)              os=macos-latest ;;
               aarch64-unknown-linux-*)     os=ubuntu-24.04-arm ;;
-              x86_64-unknown-linux-*)      os=ubuntu-latest ;;
+              x86_64-unknown-linux-*)      os=${FORGE_RUNNER:-ubuntu-latest} ;;
               aarch64-pc-windows-msvc)     os=windows-11-arm ;;
               x86_64-pc-windows-msvc)      os=windows-latest ;;
               *) echo "::error::No runner known for target $target"; exit 1 ;;
@@ -259,7 +261,7 @@ jobs:
   crates-io:
     needs: [verify, build]
     if: ${{ inputs.crates-io && needs.verify.result == 'success' && !failure() && !cancelled() }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.FORGE_RUNNER || 'ubuntu-latest' }}
     environment: release
     permissions:
       id-token: write
@@ -276,7 +278,7 @@ jobs:
   github-release:
     needs: [verify, build, crates-io]
     if: ${{ needs.verify.result == 'success' && !failure() && !cancelled() }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.FORGE_RUNNER || 'ubuntu-latest' }}
     permissions:
       contents: write
     steps:
@@ -299,7 +301,7 @@ jobs:
   homebrew:
     needs: [verify, github-release]
     if: ${{ inputs.homebrew && needs.verify.result == 'success' && !failure() && !cancelled() }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.FORGE_RUNNER || 'ubuntu-latest' }}
     environment: release
     permissions:
       contents: read
@@ -397,7 +399,7 @@ jobs:
   winget:
     needs: [verify, github-release]
     if: ${{ inputs.winget && needs.verify.result == 'success' && !failure() && !cancelled() }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.FORGE_RUNNER || 'ubuntu-latest' }}
     permissions: {}
     steps:
       - name: Check the package exists in winget-pkgs

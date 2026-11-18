@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-11-18
+
+### Added
+
+- `[runner]` runs private repos' Linux jobs on runners of your own, whose
+  minutes GitHub doesn't bill. forge points each private repo's shared
+  workflows at the runners' label, through the repo variable
+  `FORGE_RUNNER`, and reports a private repo running workflows without an
+  online runner. A public repo must have no runner at all: anyone's pull
+  request would run code on it. Runners without a Docker daemon build
+  images on the buildkitd that `buildkit` names. macOS, Windows and arm64
+  jobs stay on GitHub's runners.
+
 ## [0.10.0] - 2026-11-14
 
 ### Added
