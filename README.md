@@ -356,8 +356,9 @@ rendered on the server can do the same for those links:
 - On a click, `history.pushState` the item's own URL, fetch that page in
   the background, and show its content over the list or in place of it. On
   `popstate` (Back and Forward), show whatever the URL now names, with its
-  `<title>` and `theme-color`. A close button or Esc goes `history.back()`,
-  so closing and Back are the same step.
+  `<title>` and `theme-color`. An item shown over the list closes with
+  `history.back()`, from its close button or Esc, so closing and Back are
+  the same step.
 - Leave clicks with a modifier key, such as Ctrl-click for a new tab, to the
   browser, and if the fetch fails, let the link load the page.
 - Keep serving each URL as a page of its own, so direct links, reloads and
