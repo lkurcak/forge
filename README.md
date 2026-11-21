@@ -345,31 +345,15 @@ with a `url` are checked, and forge exits 1 if a check fails; warnings
 don't. Uptime and certificate expiry are better left to an uptime monitor,
 which checks every minute rather than when you run forge.
 
-Not checked, but expected of a site: moving between pages that people go
-back and forth between, such as a list and one of its items, doesn't load a
-new page. Browsers reset a tab's icon whenever a new document loads, and
-show their default one until the page's own icon reaches the tab, even when
-it's cached, so every such click makes the icon flash. A single-page app
-that routes by `#` fragment or the History API already avoids it. A site
-rendered on the server can do the same for those links:
-
-- On a click, `history.pushState` the item's own URL, fetch that page in
-  the background, and show its content over the list or in place of it. On
-  `popstate` (Back and Forward), show whatever the URL now names, with its
-  `<title>` and `theme-color`. An item shown over the list closes with
-  `history.back()`, from its close button or Esc, so closing and Back are
-  the same step.
-- Leave clicks with a modifier key, such as Ctrl-click for a new tab, to the
-  browser, and if the fetch fails, let the link load the page.
-- Keep serving each URL as a page of its own, so direct links, reloads and
-  link previews still work.
-
-Links people follow now and then, to a settings page say, can stay plain
-links. No cheap check could tell them apart: the pages where this matters
-are mostly behind a login, which `forge web` doesn't have; which links
-people repeat can't be read from the HTML; and a script that calls
-`pushState` somewhere doesn't show that those links use it. Telling for
-sure takes a browser clicking through the site.
+Plain page loads are fine. Firefox with vertical tabs shows its default
+icon in the tab while any page loads, so a fast site's icon flickers on
+every click however well it's cached
+([bug 1918068](https://bugzilla.mozilla.org/show_bug.cgi?id=1918068);
+horizontal tabs don't), and Wikipedia's does too. That's for Firefox to fix,
+so sites don't work around it: same-document navigation (`pushState` and a
+background fetch) costs a few hundred lines of script per site. Use it only
+where the design wants it anyway, such as an image opened over its gallery
+in image-viewer.
 
 ### Merging on green
 
