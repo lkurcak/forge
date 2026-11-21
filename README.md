@@ -345,6 +345,16 @@ with a `url` are checked, and forge exits 1 if a check fails; warnings
 don't. Uptime and certificate expiry are better left to an uptime monitor,
 which checks every minute rather than when you run forge.
 
+Plain page loads are fine. Firefox with vertical tabs shows its default
+icon in the tab while any page loads, so a fast site's icon flickers on
+every click however well it's cached
+([bug 1918068](https://bugzilla.mozilla.org/show_bug.cgi?id=1918068);
+horizontal tabs don't), and Wikipedia's does too. That's for Firefox to fix,
+so sites don't work around it: same-document navigation (`pushState` and a
+background fetch) costs a few hundred lines of script per site. Use it only
+where the design wants it anyway, such as an image opened over its gallery
+in image-viewer.
+
 ### Merging on green
 
 The `require-ci` ruleset requires the check `ci / ok`. `rust-ci.yml` ends
