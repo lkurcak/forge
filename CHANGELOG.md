@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The shared Rust CI tests the MSRV only when the call sets `msrv: true`,
+  meant for libraries. It used to whenever Cargo.toml set `rust-version`:
+  a second full Linux test run, often the slowest job, that an application
+  built on recent stable gains little from. With `msrv: true` and no
+  `rust-version`, the job fails rather than checking nothing.
+
 ### Fixed
 
 - The shared Rust CI no longer breaks runners of your own (`[runner]`).
