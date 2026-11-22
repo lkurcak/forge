@@ -195,7 +195,10 @@ This repo's workflows are public, and anyone can call them at `@v1`, which
 moves along with compatible changes:
 
 - [`rust-ci.yml`](.github/workflows/rust-ci.yml): fmt, clippy, tests on
-  Linux, macOS and Windows, docs, packaging and the MSRV. With
+  Linux, macOS and Windows, docs and packaging. `msrv: true` tests the
+  oldest Rust Cargo.toml's `rust-version` claims too, for libraries, whose
+  users build them with their own Rust; an application built on recent
+  stable is better off without that second Linux test run. With
   `container: true` it builds and publishes a multi-arch image to ghcr.io
   instead of testing on macOS and Windows. Pushes to the default branch
   publish it as `latest`, and while the registry lacks Cargo.toml's version,
