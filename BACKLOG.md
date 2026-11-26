@@ -8,6 +8,8 @@
   reverse: report a `maintenance` repo that gets real work again (#46).
 - `scripts/winget-new.sh` handles a repo whose binary isn't named like it. It assumes
   `{repo}.exe`, so such a repo's first winget manifest is fixed by hand.
+- `forge ci [REPO]`: run the light CI checks on this machine for any branch and post the result
+  as a commit status, so a private repo's pull requests need no Actions run.
 
 ## Done
 
