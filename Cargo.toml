@@ -8,7 +8,7 @@ repository = "https://github.com/lkurcak/forge"
 readme = "README.md"
 keywords = ["github", "repository", "settings", "rulesets", "cli"]
 categories = ["command-line-utilities", "development-tools"]
-exclude = [".claude", ".github/dependabot.yml", ".github/workflows/ci.yml", ".github/workflows/pr.yml", ".github/workflows/release.yml"]
+exclude = [".claude", ".github/dependabot.yml", ".github/workflows/ci.yml", ".github/workflows/pr.yml", ".github/workflows/release.yml", "BACKLOG.md", "CLAUDE.md"]
 
 # The crate is forgectl, since forge was taken; the command is still forge.
 [[bin]]
