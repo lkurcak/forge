@@ -10,6 +10,10 @@ name: T CI
 # of running something else. Then it runs `run`, the repo's own script, which
 # says what checking it means: typically `t check --deny-warnings`, `t fmt
 # --check`, `t test`, and the program's output against what's expected.
+#
+# A pull request or push that changes nothing but BACKLOG.md, backlog/ and
+# the paths the `untested` input names skips those steps, and `ok` passes,
+# as in rust-ci.yml (see its header).
 
 on:
   workflow_call:
@@ -28,6 +32,13 @@ on:
         description: The command that checks the repo, run from its root.
         type: string
         default: tests/run.sh
+      untested:
+        description: >-
+          Paths no check reads, besides BACKLOG.md and backlog/, separated
+          by spaces: a file, or a directory ending in /. A pull request or
+          push changing only such paths skips the checks, and `ok` passes.
+        type: string
+        default: ""
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -45,8 +56,67 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
+          fetch-depth: 2
           persist-credentials: false
-      - name: Install t
+      - id: changes
+        name: Does it change anything checked?
+        env:
+          UNTESTED: ${{ inputs.untested }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          # Prints checked=false when every path the change touches is
+          # untested, and checked=true otherwise: on another event, on a push
+          # of more than one commit, on an empty diff, or when it can't tell.
+          # Not -e: a failure to tell is checked=true. The same in rust-ci.yml
+          # (twice) and t-ci.yml, which a test of forge's checks.
+          set +e -uo pipefail
+          list=(BACKLOG.md backlog/)
+          set -f
+          for p in $UNTESTED; do
+            if [[ ! "$p" =~ ^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*/?$ ]]; then
+              echo "::error::untested: not a path of the repo: $p"
+              exit 1
+            fi
+            list+=("$p")
+          done
+          set +f
+          listed() {
+            local p
+            for p in "${list[@]}"; do
+              case "$p" in
+                */) [[ "$1" == "$p"* ]] && return 0 ;;
+                *) [[ "$1" == "$p" ]] && return 0 ;;
+              esac
+            done
+            return 1
+          }
+          only_untested() {
+            local base files f
+            case "$GITHUB_EVENT_NAME" in
+              pull_request) base=HEAD^1 ;;
+              push)
+                base=$(git rev-parse -q --verify 'HEAD^') || return 1
+                [[ "$base" == "$BEFORE" ]] || return 1
+                ;;
+              *) return 1 ;;
+            esac
+            files=$(git diff --no-renames --name-only "$base" HEAD) || return 1
+            [[ -n "$files" ]] || return 1
+            while IFS= read -r f; do
+              if ! listed "$f"; then
+                echo "Checked: $f"
+                return 1
+              fi
+            done <<<"$files"
+          }
+          if only_untested; then
+            echo "Only untested paths changed, so the checks are skipped"
+            echo "checked=false" >>"$GITHUB_OUTPUT"
+          else
+            echo "checked=true" >>"$GITHUB_OUTPUT"
+          fi
+      - if: steps.changes.outputs.checked != 'false'
+        name: Install t
         env:
           T_VERSION: ${{ inputs.t-version }}
           T_SHA256: ${{ inputs.t-sha256 }}
@@ -63,8 +133,10 @@ jobs:
           mv "${name}/t" "$HOME/.local/bin/t"
           rm -r t.tar.gz "${name}"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-      - run: t --version
-      - name: Check
+      - if: steps.changes.outputs.checked != 'false'
+        run: t --version
+      - if: steps.changes.outputs.checked != 'false'
+        name: Check
         env:
           RUN: ${{ inputs.run }}
         run: bash -c "$RUN"

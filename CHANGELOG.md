@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- The shared Rust and T CI skip their checks on a pull request or push
+  that changes nothing but `BACKLOG.md` and `backlog/`, which no check
+  reads, and `ci / ok` still passes, so a backlog edit merges in about a
+  minute instead of waiting for every test. The `untested` input adds
+  paths of the repo's own. Anything else runs everything: a path off the
+  list, a rename's old path, a push of several commits, scheduled and
+  manual runs, or a failure to tell. It isn't `paths-ignore` in the
+  caller because a workflow that doesn't start never reports `ci / ok`,
+  which the ruleset requires.
+
 ### Changed
 
 - The shared Rust CI tests the MSRV only when the call sets `msrv: true`,

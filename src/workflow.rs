@@ -684,6 +684,35 @@ jobs:
         );
     }
 
+    /// rust-ci.yml and t-ci.yml tell alike which changes skip the checks:
+    /// each has the `untested` input, and every step `changes` (rust-ci's
+    /// job, its light `ok`, and t-ci's `ok`) runs the same script.
+    #[test]
+    fn the_ci_workflows_skip_alike() {
+        let mut scripts = Vec::new();
+        for file in ["rust-ci.yml", "t-ci.yml"] {
+            let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join(".github/workflows")
+                .join(file);
+            let yaml: Value =
+                serde_yaml_ng::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+            for job in yaml["jobs"].as_object().unwrap().values() {
+                for step in job["steps"].as_array().unwrap() {
+                    if step["id"] == "changes" {
+                        scripts.push(step["run"].as_str().unwrap().to_owned());
+                    }
+                }
+            }
+        }
+        assert_eq!(scripts.len(), 3);
+        assert!(scripts[0].contains("list=(BACKLOG.md backlog/)"));
+        assert!(scripts.iter().all(|s| *s == scripts[0]));
+        for name in ["rust-ci", "t-ci"] {
+            let uses = format!("lkurcak/forge/.github/workflows/{name}.yml@v1");
+            assert!(local("ci.yml", &uses).unwrap().has_input("untested"));
+        }
+    }
+
     #[test]
     fn reads_a_call() {
         let shared = shared();
