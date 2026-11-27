@@ -19,6 +19,8 @@ default branch, so it has to be true there.
   under Later instead of leaving them in the chat. Don't invent items.
 - Done is newest first, a line each, ending with the pull request's number where there is
   one (`(#63)`). It keeps about the last ten; git has the rest.
+- Name an item by its words or its details file, not by its number: numbers shift when an
+  item above it is done. Told a number, say the item's title back before you start.
 - On "go", read `BACKLOG.md` and continue with the first item under Now that you can do:
   not the owner's, and not one still waiting for its date. Tell the owner which of theirs
   are waiting.
