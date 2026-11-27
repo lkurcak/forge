@@ -44,59 +44,6 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  # What `ok`'s first step runs: the same as rust-ci.yml's.
-  CHANGES: |
-    # Prints checked=false when every path the change touches is untested,
-    # and checked=true otherwise: on another event, on a push of more than
-    # one commit, on an empty diff, or when it can't tell.
-    set -uo pipefail
-    list=(BACKLOG.md backlog/)
-    set -f
-    for p in $UNTESTED; do
-      if [[ ! "$p" =~ ^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*/?$ ]]; then
-        echo "::error::untested: not a path of the repo: $p"
-        exit 1
-      fi
-      list+=("$p")
-    done
-    set +f
-    listed() {
-      local p
-      for p in "${list[@]}"; do
-        case "$p" in
-          */) [[ "$1" == "$p"* ]] && return 0 ;;
-          *) [[ "$1" == "$p" ]] && return 0 ;;
-        esac
-      done
-      return 1
-    }
-    only_untested() {
-      local base files f
-      case "$GITHUB_EVENT_NAME" in
-        pull_request) base=HEAD^1 ;;
-        push)
-          base=$(git rev-parse -q --verify 'HEAD^') || return 1
-          [[ "$base" == "$BEFORE" ]] || return 1
-          ;;
-        *) return 1 ;;
-      esac
-      files=$(git diff --no-renames --name-only "$base" HEAD) || return 1
-      [[ -n "$files" ]] || return 1
-      while IFS= read -r f; do
-        if ! listed "$f"; then
-          echo "Checked: $f"
-          return 1
-        fi
-      done <<<"$files"
-    }
-    if only_untested; then
-      echo "Only untested paths changed, so the checks are skipped"
-      echo "checked=false" >>"$GITHUB_OUTPUT"
-    else
-      echo "checked=true" >>"$GITHUB_OUTPUT"
-    fi
-
 jobs:
   # Named `ok`, so it's the check a ruleset requires (require-ci, "ci / ok"),
   # as for Rust repos, and a PR's auto-merge waits for it. rust-ci needs a
@@ -116,7 +63,58 @@ jobs:
         env:
           UNTESTED: ${{ inputs.untested }}
           BEFORE: ${{ github.event.before }}
-        run: bash -c "$CHANGES"
+        run: |
+          # Prints checked=false when every path the change touches is
+          # untested, and checked=true otherwise: on another event, on a push
+          # of more than one commit, on an empty diff, or when it can't tell.
+          # Not -e: a failure to tell is checked=true. The same in rust-ci.yml
+          # (twice) and t-ci.yml, which a test of forge's checks.
+          set +e -uo pipefail
+          list=(BACKLOG.md backlog/)
+          set -f
+          for p in $UNTESTED; do
+            if [[ ! "$p" =~ ^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*/?$ ]]; then
+              echo "::error::untested: not a path of the repo: $p"
+              exit 1
+            fi
+            list+=("$p")
+          done
+          set +f
+          listed() {
+            local p
+            for p in "${list[@]}"; do
+              case "$p" in
+                */) [[ "$1" == "$p"* ]] && return 0 ;;
+                *) [[ "$1" == "$p" ]] && return 0 ;;
+              esac
+            done
+            return 1
+          }
+          only_untested() {
+            local base files f
+            case "$GITHUB_EVENT_NAME" in
+              pull_request) base=HEAD^1 ;;
+              push)
+                base=$(git rev-parse -q --verify 'HEAD^') || return 1
+                [[ "$base" == "$BEFORE" ]] || return 1
+                ;;
+              *) return 1 ;;
+            esac
+            files=$(git diff --no-renames --name-only "$base" HEAD) || return 1
+            [[ -n "$files" ]] || return 1
+            while IFS= read -r f; do
+              if ! listed "$f"; then
+                echo "Checked: $f"
+                return 1
+              fi
+            done <<<"$files"
+          }
+          if only_untested; then
+            echo "Only untested paths changed, so the checks are skipped"
+            echo "checked=false" >>"$GITHUB_OUTPUT"
+          else
+            echo "checked=true" >>"$GITHUB_OUTPUT"
+          fi
       - if: steps.changes.outputs.checked != 'false'
         name: Install t
         env:
