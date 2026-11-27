@@ -1,0 +1,11 @@
+name: Test light
+on:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  ci:
+    uses: ./.github/workflows/rust-ci.yml
+    with:
+      light: true
+      untested: .github/ CHANGELOG.md README.md src/

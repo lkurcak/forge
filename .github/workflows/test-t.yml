@@ -1,0 +1,13 @@
+name: Test T
+on:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  ci:
+    uses: ./.github/workflows/t-ci.yml
+    with:
+      t-version: v0.109.0
+      t-sha256: cc8873688ea903b85d8877203b82c0982df2386d483426f6e60572dc35988296
+      run: t --version
+      untested: .github/ CHANGELOG.md README.md src/
