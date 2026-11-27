@@ -684,6 +684,27 @@ jobs:
         );
     }
 
+    /// rust-ci.yml and t-ci.yml tell alike which changes skip the checks:
+    /// each has the `untested` input and holds the same script.
+    #[test]
+    fn the_ci_workflows_skip_alike() {
+        let script = |file: &str| {
+            let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join(".github/workflows")
+                .join(file);
+            let yaml: Value =
+                serde_yaml_ng::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+            yaml["env"]["CHANGES"].as_str().unwrap().to_owned()
+        };
+        let rust = script("rust-ci.yml");
+        assert!(rust.contains("list=(BACKLOG.md backlog/)"));
+        assert_eq!(rust, script("t-ci.yml"));
+        for name in ["rust-ci", "t-ci"] {
+            let uses = format!("lkurcak/forge/.github/workflows/{name}.yml@v1");
+            assert!(local("ci.yml", &uses).unwrap().has_input("untested"));
+        }
+    }
+
     #[test]
     fn reads_a_call() {
         let shared = shared();

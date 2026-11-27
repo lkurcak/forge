@@ -211,6 +211,11 @@ moves along with compatible changes:
   Linux job on pull requests (fmt, clippy and, unless `tests: false`, the
   tests), and on pushes only the image, for linux/amd64 unless
   `arm64: true`. Pull requests from `forge deps` skip even that one job.
+  A pull request or push that changes nothing but `BACKLOG.md` and
+  `backlog/`, which no check reads, skips the checks, and `ci / ok` passes:
+  a backlog edit merges in about a minute. `untested` adds paths of the
+  repo's own to that list; anything else, or anything it can't tell, runs
+  everything.
 - [`rust-release.yml`](.github/workflows/rust-release.yml): on a `vX.Y.Z`
   tag, publishes to crates.io through trusted publishing, attaches binaries
   to the GitHub release, and bumps the formula in `{owner}/homebrew-tap` and
@@ -222,7 +227,8 @@ moves along with compatible changes:
   passed, so forge leaves the `require-pr-title` ruleset out on private
   repos, even with `private_protection = true`.
 - [`t-ci.yml`](.github/workflows/t-ci.yml): checks repos written in
-  [T](https://github.com/lkurcak/t-lang).
+  [T](https://github.com/lkurcak/t-lang), and skips the same changes as
+  `rust-ci.yml`.
 
 [`callers/`](callers) has an example call of each, and each workflow's
 inputs say what they do.

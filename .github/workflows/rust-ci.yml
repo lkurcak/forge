@@ -71,6 +71,18 @@ name: Rust CI
 # This leaves `ci / ok` skipped, which only works without a ruleset
 # requiring it, as on private repos without private_protection.
 #
+# A pull request or push that changes nothing but BACKLOG.md and backlog/
+# (the backlog almanac shows, which no check reads) and the paths the
+# `untested` input names skips the checks. The `changes` job (with light,
+# a step of `ok`) lists the paths it touches, against the pull request's
+# base or the push's one parent, and every other job runs unless each of
+# them is on that list. `ok` still runs and passes. That's why this isn't
+# `paths-ignore` in the caller: a workflow that doesn't start never
+# reports `ci / ok`, so the ruleset would keep the pull request waiting.
+# What it can't tell runs everything: scheduled and manual runs, a push of
+# more than one commit, a rename (its old path counts too), a path git
+# quotes, a failure to tell. Images are built as before.
+#
 # Image layers are cached between runs, so the Dockerfile compiles the
 # dependencies in a layer of their own with cargo-chef (forge's `container`
 # tag checks for it). That layer only rebuilds when Cargo.toml, Cargo.lock or
@@ -156,6 +168,14 @@ on:
           as linux/amd64. Without light, images are always built for both.
         type: boolean
         default: false
+      untested:
+        description: >-
+          Paths no check reads, besides BACKLOG.md and backlog/, separated
+          by spaces: a file, or a directory ending in /. A pull request or
+          push changing only such paths skips the checks, and `ok` passes.
+          See the header.
+        type: string
+        default: ""
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -172,10 +192,83 @@ env:
     libx11-dev libxrandr-dev libxcursor-dev libxi-dev libxinerama-dev
     libegl1-mesa-dev libgl1-mesa-dev libgles2-mesa-dev
   IMAGE: ghcr.io/${{ github.repository }}
+  # What the `changes` job runs, and with light, `ok` (see the header).
+  # t-ci.yml has the same.
+  CHANGES: |
+    # Prints checked=false when every path the change touches is untested,
+    # and checked=true otherwise: on another event, on a push of more than
+    # one commit, on an empty diff, or when it can't tell.
+    set -uo pipefail
+    list=(BACKLOG.md backlog/)
+    set -f
+    for p in $UNTESTED; do
+      if [[ ! "$p" =~ ^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*/?$ ]]; then
+        echo "::error::untested: not a path of the repo: $p"
+        exit 1
+      fi
+      list+=("$p")
+    done
+    set +f
+    listed() {
+      local p
+      for p in "${list[@]}"; do
+        case "$p" in
+          */) [[ "$1" == "$p"* ]] && return 0 ;;
+          *) [[ "$1" == "$p" ]] && return 0 ;;
+        esac
+      done
+      return 1
+    }
+    only_untested() {
+      local base files f
+      case "$GITHUB_EVENT_NAME" in
+        pull_request) base=HEAD^1 ;;
+        push)
+          base=$(git rev-parse -q --verify 'HEAD^') || return 1
+          [[ "$base" == "$BEFORE" ]] || return 1
+          ;;
+        *) return 1 ;;
+      esac
+      files=$(git diff --no-renames --name-only "$base" HEAD) || return 1
+      [[ -n "$files" ]] || return 1
+      while IFS= read -r f; do
+        if ! listed "$f"; then
+          echo "Checked: $f"
+          return 1
+        fi
+      done <<<"$files"
+    }
+    if only_untested; then
+      echo "Only untested paths changed, so the checks are skipped"
+      echo "checked=false" >>"$GITHUB_OUTPUT"
+    else
+      echo "checked=true" >>"$GITHUB_OUTPUT"
+    fi
 
 jobs:
-  fmt:
+  # Whether the change touches anything a check reads (see the header).
+  changes:
     if: ${{ !inputs.light }}
+    permissions:
+      contents: read
+    runs-on: ${{ vars.FORGE_RUNNER || 'ubuntu-latest' }}
+    outputs:
+      checked: ${{ steps.changes.outputs.checked }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - id: changes
+        name: Does it change anything checked?
+        env:
+          UNTESTED: ${{ inputs.untested }}
+          BEFORE: ${{ github.event.before }}
+        run: bash -c "$CHANGES"
+
+  fmt:
+    needs: changes
+    if: ${{ !inputs.light && needs.changes.outputs.checked != 'false' }}
     permissions:
       contents: read
     runs-on: ${{ vars.FORGE_RUNNER || 'ubuntu-latest' }}
@@ -187,7 +280,8 @@ jobs:
       - run: cargo fmt --all --check
 
   clippy:
-    if: ${{ !inputs.light }}
+    needs: changes
+    if: ${{ !inputs.light && needs.changes.outputs.checked != 'false' }}
     permissions:
       contents: read
     runs-on: ${{ vars.FORGE_RUNNER || 'ubuntu-latest' }}
@@ -207,7 +301,8 @@ jobs:
       - run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 
   test:
-    if: ${{ !inputs.light }}
+    needs: changes
+    if: ${{ !inputs.light && needs.changes.outputs.checked != 'false' }}
     permissions:
       contents: read
     strategy:
@@ -232,7 +327,8 @@ jobs:
       - run: cargo test --workspace --all-features --locked
 
   doc:
-    if: ${{ !inputs.light }}
+    needs: changes
+    if: ${{ !inputs.light && needs.changes.outputs.checked != 'false' }}
     permissions:
       contents: read
     runs-on: ${{ vars.FORGE_RUNNER || 'ubuntu-latest' }}
@@ -254,7 +350,8 @@ jobs:
   # What the release would upload to crates.io, for crates that can be
   # published at all.
   package:
-    if: ${{ !inputs.light }}
+    needs: changes
+    if: ${{ !inputs.light && needs.changes.outputs.checked != 'false' }}
     permissions:
       contents: read
     runs-on: ${{ vars.FORGE_RUNNER || 'ubuntu-latest' }}
@@ -275,7 +372,8 @@ jobs:
           cargo publish --workspace --dry-run --locked
 
   msrv:
-    if: inputs.msrv && !inputs.light
+    needs: changes
+    if: inputs.msrv && !inputs.light && needs.changes.outputs.checked != 'false'
     permissions:
       contents: read
     runs-on: ${{ vars.FORGE_RUNNER || 'ubuntu-latest' }}
@@ -310,7 +408,8 @@ jobs:
   no-std:
     permissions:
       contents: read
-    if: inputs.no-std && !inputs.light
+    needs: changes
+    if: inputs.no-std && !inputs.light && needs.changes.outputs.checked != 'false'
     runs-on: ${{ vars.FORGE_RUNNER || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v7
@@ -498,7 +597,7 @@ jobs:
       ${{ !inputs.light && always()
       || inputs.light && !cancelled() && github.event_name != 'push'
       && (github.head_ref != 'forge/deps' || inputs.no-std) }}
-    needs: [fmt, clippy, test, doc, package, msrv, no-std, container, container-publish]
+    needs: [changes, fmt, clippy, test, doc, package, msrv, no-std, container, container-publish]
     permissions:
       contents: read
     runs-on: ${{ vars.FORGE_RUNNER || 'ubuntu-latest' }}
@@ -514,31 +613,41 @@ jobs:
           done
       - if: inputs.light
         uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
+          persist-credentials: false
       - if: inputs.light
+        id: changes
+        name: Does it change anything checked?
+        env:
+          UNTESTED: ${{ inputs.untested }}
+          BEFORE: ${{ github.event.before }}
+        run: bash -c "$CHANGES"
+      - if: inputs.light && steps.changes.outputs.checked != 'false'
         uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
           targets: ${{ inputs.no-std && env.NO_STD_TARGET || '' }}
-      - if: inputs.light && inputs.bevy
+      - if: inputs.light && inputs.bevy && steps.changes.outputs.checked != 'false'
         name: Install Bevy's Linux libraries
         run: |
           # shellcheck disable=SC2086 # one argument per package
           sudo apt-get update && sudo apt-get install -y --no-install-recommends $BEVY_LINUX_PACKAGES
-      - if: inputs.light
+      - if: inputs.light && steps.changes.outputs.checked != 'false'
         run: cargo fmt --all --check
       # Pull requests start from the default branch's cache, and a pull
       # request's own is rarely read again (most get one run), so light
       # saves it from the weekly and manual runs alone: quicker pull
       # requests, and their caches don't crowd the image layers out of the
       # repo's 10 GB.
-      - if: inputs.light
+      - if: inputs.light && steps.changes.outputs.checked != 'false'
         uses: Swatinem/rust-cache@v2
         with:
           cache-bin: false
           save-if: ${{ github.event_name != 'pull_request' }}
-      - if: inputs.light
+      - if: inputs.light && steps.changes.outputs.checked != 'false'
         run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
-      - if: inputs.light && inputs.tests
+      - if: inputs.light && inputs.tests && steps.changes.outputs.checked != 'false'
         run: cargo test --workspace --all-features --locked
-      - if: inputs.light && inputs.no-std
+      - if: inputs.light && inputs.no-std && steps.changes.outputs.checked != 'false'
         run: cargo build --workspace --no-default-features --locked --target "$NO_STD_TARGET"
