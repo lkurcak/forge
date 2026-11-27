@@ -13,6 +13,4 @@ permissions:
 
 jobs:
   ci:
-    uses: ./.github/workflows/rust-ci.yml
-    with:
-      untested: .github/ CHANGELOG.md README.md src/
+    uses: lkurcak/forge/.github/workflows/rust-ci.yml@v1

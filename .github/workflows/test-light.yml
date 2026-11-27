@@ -8,4 +8,3 @@ jobs:
     uses: ./.github/workflows/rust-ci.yml
     with:
       light: true
-      untested: .github/ CHANGELOG.md README.md src/
