@@ -211,11 +211,11 @@ moves along with compatible changes:
   Linux job on pull requests (fmt, clippy and, unless `tests: false`, the
   tests), and on pushes only the image, for linux/amd64 unless
   `arm64: true`. Pull requests from `forge deps` skip even that one job.
-  A pull request or push that changes nothing but `BACKLOG.md` and
-  `backlog/`, which no check reads, skips the checks, and `ci / ok` passes:
-  a backlog edit merges in about a minute. `untested` adds paths of the
-  repo's own to that list; anything else, or anything it can't tell, runs
-  everything.
+  A pull request or push that changes nothing but `BACKLOG.md`, `backlog/`,
+  `CLAUDE.md` and `PROJECT.md`, which no check reads, skips the checks, and
+  `ci / ok` passes: a backlog edit merges in about a minute. `untested` adds
+  paths of the repo's own to that list; anything else, or anything it can't
+  tell, runs everything.
 - [`rust-release.yml`](.github/workflows/rust-release.yml): on a `vX.Y.Z`
   tag, publishes to crates.io through trusted publishing, attaches binaries
   to the GitHub release, and bumps the formula in `{owner}/homebrew-tap` and

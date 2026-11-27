@@ -11,9 +11,9 @@ name: T CI
 # says what checking it means: typically `t check --deny-warnings`, `t fmt
 # --check`, `t test`, and the program's output against what's expected.
 #
-# A pull request or push that changes nothing but BACKLOG.md, backlog/ and
-# the paths the `untested` input names skips those steps, and `ok` passes,
-# as in rust-ci.yml (see its header).
+# A pull request or push that changes nothing but BACKLOG.md, backlog/,
+# CLAUDE.md, PROJECT.md and the paths the `untested` input names skips
+# those steps, and `ok` passes, as in rust-ci.yml (see its header).
 
 on:
   workflow_call:
@@ -34,9 +34,10 @@ on:
         default: tests/run.sh
       untested:
         description: >-
-          Paths no check reads, besides BACKLOG.md and backlog/, separated
-          by spaces: a file, or a directory ending in /. A pull request or
-          push changing only such paths skips the checks, and `ok` passes.
+          Paths no check reads, besides BACKLOG.md, backlog/, CLAUDE.md and
+          PROJECT.md, separated by spaces: a file, or a directory ending in
+          /. A pull request or push changing only such paths skips the
+          checks, and `ok` passes.
         type: string
         default: ""
 
@@ -70,7 +71,7 @@ jobs:
           # Not -e: a failure to tell is checked=true. The same in rust-ci.yml
           # (twice) and t-ci.yml, which a test of forge's checks.
           set +e -uo pipefail
-          list=(BACKLOG.md backlog/)
+          list=(BACKLOG.md backlog/ CLAUDE.md PROJECT.md)
           set -f
           for p in $UNTESTED; do
             if [[ ! "$p" =~ ^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*/?$ ]]; then

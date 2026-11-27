@@ -72,12 +72,13 @@ name: Rust CI
 # requiring it, as on private repos without private_protection.
 #
 # A pull request or push that changes nothing but BACKLOG.md and backlog/
-# (the backlog almanac shows, which no check reads) and the paths the
-# `untested` input names skips the checks. The `changes` job (with light,
-# a step of `ok`) lists the paths it touches, against the pull request's
-# base or the push's one parent, and every other job runs unless each of
-# them is on that list. `ok` still runs and passes. That's why this isn't
-# `paths-ignore` in the caller: a workflow that doesn't start never
+# (the backlog almanac shows), CLAUDE.md and PROJECT.md at the root (notes
+# for agents and the owner's decisions), which no check reads, and the paths
+# the `untested` input names skips the checks. The `changes` job (with
+# light, a step of `ok`) lists the paths it touches, against the pull
+# request's base or the push's one parent, and every other job runs unless
+# each of them is on that list. `ok` still runs and passes. That's why this
+# isn't `paths-ignore` in the caller: a workflow that doesn't start never
 # reports `ci / ok`, so the ruleset would keep the pull request waiting.
 # What it can't tell runs everything: scheduled and manual runs, a push of
 # more than one commit, a rename (its old path counts too), a path git
@@ -170,10 +171,10 @@ on:
         default: false
       untested:
         description: >-
-          Paths no check reads, besides BACKLOG.md and backlog/, separated
-          by spaces: a file, or a directory ending in /. A pull request or
-          push changing only such paths skips the checks, and `ok` passes.
-          See the header.
+          Paths no check reads, besides BACKLOG.md, backlog/, CLAUDE.md and
+          PROJECT.md, separated by spaces: a file, or a directory ending in
+          /. A pull request or push changing only such paths skips the
+          checks, and `ok` passes. See the header.
         type: string
         default: ""
 
@@ -219,7 +220,7 @@ jobs:
           # Not -e: a failure to tell is checked=true. The same in rust-ci.yml
           # (twice) and t-ci.yml, which a test of forge's checks.
           set +e -uo pipefail
-          list=(BACKLOG.md backlog/)
+          list=(BACKLOG.md backlog/ CLAUDE.md PROJECT.md)
           set -f
           for p in $UNTESTED; do
             if [[ ! "$p" =~ ^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*/?$ ]]; then
@@ -628,7 +629,7 @@ jobs:
           # Not -e: a failure to tell is checked=true. The same in rust-ci.yml
           # (twice) and t-ci.yml, which a test of forge's checks.
           set +e -uo pipefail
-          list=(BACKLOG.md backlog/)
+          list=(BACKLOG.md backlog/ CLAUDE.md PROJECT.md)
           set -f
           for p in $UNTESTED; do
             if [[ ! "$p" =~ ^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*/?$ ]]; then

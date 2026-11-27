@@ -705,7 +705,7 @@ jobs:
             }
         }
         assert_eq!(scripts.len(), 3);
-        assert!(scripts[0].contains("list=(BACKLOG.md backlog/)"));
+        assert!(scripts[0].contains("list=(BACKLOG.md backlog/ CLAUDE.md PROJECT.md)"));
         assert!(scripts.iter().all(|s| *s == scripts[0]));
         for name in ["rust-ci", "t-ci"] {
             let uses = format!("lkurcak/forge/.github/workflows/{name}.yml@v1");
